@@ -1,0 +1,42 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'com.ece420.lab1'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.ece420.lab1'
+        minSdk 28
+        targetSdk 29    // Android 10
+//        targetSdk 33    //Android 13
+//        targetSdk 34    //Android 14
+        versionCode 1
+        versionName "1.0"
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+    productFlavors {
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+
+    // Core Android dependencies
+    implementation 'androidx.core:core-ktx:1.1.0' // for Android 10
+
+    // Audio processing - FFT library for manual DSP implementation
+    implementation 'com.github.wendykierp:JTransforms:3.1'
+
+    // UI components
+    implementation 'androidx.recyclerview:recyclerview:1.2.1'
+    implementation 'com.jjoe64:graphview:4.2.1'  // For waveform visualization
+
+    // JSON for simple data persistence
+    implementation 'com.google.code.gson:gson:2.10.1'
+
+}
