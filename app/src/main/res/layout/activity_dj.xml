@@ -97,9 +97,9 @@
         android:divider="#CCCCCC"
         android:dividerHeight="1dp" />
 
-    <!-- Waveform Graph -->
-    <com.jjoe64.graphview.GraphView
-        android:id="@+id/waveformGraph"
+    <!-- Waveform Visualization -->
+    <com.ece420.lab1.WaveformView
+        android:id="@+id/waveformView"
         android:layout_width="match_parent"
         android:layout_height="200dp"
         android:layout_marginTop="10dp" />

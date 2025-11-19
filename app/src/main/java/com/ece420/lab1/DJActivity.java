@@ -25,9 +25,6 @@ import androidx.core.content.ContextCompat;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
-import com.jjoe64.graphview.GraphView;
-import com.jjoe64.graphview.series.DataPoint;
-import com.jjoe64.graphview.series.LineGraphSeries;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -54,8 +51,7 @@ public class DJActivity extends Activity {
     private TextView tvBPMValue;
     private TextView tvCurrentTrack;
     private ListView lvTrackList;
-    private GraphView waveformGraph;
-    private LineGraphSeries<DataPoint> waveformSeries;
+    private WaveformView waveformView;
 
     // Audio Components
     private AudioPlayerManager audioPlayerManager;
@@ -99,17 +95,7 @@ public class DJActivity extends Activity {
         tvBPMValue = findViewById(R.id.tvBPMValue);
         tvCurrentTrack = findViewById(R.id.tvCurrentTrack);
         lvTrackList = findViewById(R.id.lvTrackList);
-        waveformGraph = findViewById(R.id.waveformGraph);
-
-        // Setup graph
-        waveformSeries = new LineGraphSeries<>();
-        waveformGraph.addSeries(waveformSeries);
-        waveformGraph.getViewport().setXAxisBoundsManual(true);
-        waveformGraph.getViewport().setYAxisBoundsManual(true);
-        waveformGraph.getViewport().setMinX(0);
-        waveformGraph.getViewport().setMaxX(1000);
-        waveformGraph.getViewport().setMinY(-1);
-        waveformGraph.getViewport().setMaxY(1);
+        waveformView = findViewById(R.id.waveformView);
 
         // Setup track list adapter
         trackAdapter = new ArrayAdapter<>(this,
@@ -232,8 +218,12 @@ public class DJActivity extends Activity {
                 File tempFile = copyUriToTempFile(uri);
 
                 if (tempFile != null) {
+                    Log.d(TAG, "Temp file created: " + tempFile.getAbsolutePath());
+
                     // Detect BPM
+                    Log.d(TAG, "Starting BPM detection...");
                     float bpm = bpmDetector.detectBPM(tempFile.getAbsolutePath());
+                    Log.d(TAG, "BPM detection complete: " + bpm);
 
                     // Create track object
                     Track track = new Track(fileName, tempFile.getAbsolutePath(), bpm);
@@ -254,9 +244,10 @@ public class DJActivity extends Activity {
                         btnPlay.setEnabled(true);
                         btnStop.setEnabled(true);
 
-                        // Load into player
+                        // Load into player and extract waveform
                         try {
                             audioPlayerManager.loadTrack(track.getFilePath());
+                            // Extract waveform in background
                             displayWaveform(tempFile);
                         } catch (IOException e) {
                             Log.e(TAG, "Error loading track", e);
@@ -266,9 +257,10 @@ public class DJActivity extends Activity {
                 }
             } catch (Exception e) {
                 Log.e(TAG, "Error processing file", e);
+                e.printStackTrace();
                 mainHandler.post(() -> {
                     tvBPMValue.setText("Error");
-                    Toast.makeText(DJActivity.this, "Error processing file", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(DJActivity.this, "Error processing file: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 });
             }
         });
@@ -352,30 +344,45 @@ public class DJActivity extends Activity {
     }
 
     private void displayWaveform(File audioFile) {
-        // Simple waveform display - read some samples and show them
+        Log.d(TAG, "displayWaveform called for file: " + audioFile.getAbsolutePath());
+
+        // Show loading indicator on UI thread
+        mainHandler.post(() -> {
+            Toast.makeText(this, "Extracting waveform...", Toast.LENGTH_SHORT).show();
+        });
+
+        // Extract real waveform from decoded audio
         executorService.execute(() -> {
             try {
-                // Read file (simplified - just read some bytes)
-                InputStream is = new java.io.FileInputStream(audioFile);
-                byte[] buffer = new byte[1000];  // Read 1000 samples for simple display
-                is.read(buffer);
-                is.close();
+                Log.d(TAG, "Starting waveform extraction...");
 
-                // Convert to DataPoints (simplified)
-                DataPoint[] dataPoints = new DataPoint[buffer.length];
-                for (int i = 0; i < buffer.length; i++) {
-                    // Normalize byte to -1 to 1 range
-                    float value = buffer[i] / 128.0f;
-                    dataPoints[i] = new DataPoint(i, value);
+                // Extract waveform with target of 1500 points for good visualization
+                float[] waveformData = WaveformExtractor.extractWaveform(
+                    audioFile.getAbsolutePath(),
+                    1500
+                );
+
+                Log.d(TAG, "Waveform extraction completed. Data: " + (waveformData != null ? waveformData.length + " points" : "null"));
+
+                if (waveformData == null || waveformData.length == 0) {
+                    Log.e(TAG, "Failed to extract waveform");
+                    mainHandler.post(() -> {
+                        Toast.makeText(DJActivity.this, "Failed to extract waveform", Toast.LENGTH_SHORT).show();
+                    });
+                    return;
                 }
 
-                // Update graph on UI thread
+                // Update waveform view on UI thread
                 mainHandler.post(() -> {
-                    waveformSeries.resetData(dataPoints);
-                    waveformGraph.getViewport().setMaxX(dataPoints.length);
+                    waveformView.setWaveformData(waveformData);
+                    Log.d(TAG, "Waveform displayed with " + waveformData.length + " points");
+                    Toast.makeText(DJActivity.this, "Waveform loaded!", Toast.LENGTH_SHORT).show();
                 });
             } catch (Exception e) {
                 Log.e(TAG, "Error displaying waveform", e);
+                mainHandler.post(() -> {
+                    Toast.makeText(DJActivity.this, "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                });
             }
         });
     }
