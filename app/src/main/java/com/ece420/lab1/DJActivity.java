@@ -15,6 +15,7 @@ import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.ListView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.Manifest;
@@ -53,18 +54,48 @@ public class DJActivity extends Activity {
     private ListView lvTrackList;
     private WaveformView waveformView;
 
+    // Mixing UI Components
+    private TextView tvTrack1Selection;
+    private TextView tvTrack2Selection;
+    private Spinner spinnerTransitionType;
+    private Button btnMix;
+    private TextView tvMixStatus;
+
     // Audio Components
     private AudioPlayerManager audioPlayerManager;
     private SimpleBPMDetector bpmDetector;
+    private AudioMixer audioMixer;
 
     // Data
     private List<Track> trackList;
     private ArrayAdapter<String> trackAdapter;
     private Track currentTrack;
 
+    // Mixing State
+    private Track track1ForMix = null;
+    private Track track2ForMix = null;
+    private boolean selectingTrack1 = true;
+
     // Threading
     private ExecutorService executorService;
     private Handler mainHandler;
+
+    // Playhead update handler for real-time position tracking
+    private Handler playheadHandler;
+    private Runnable playheadUpdater = new Runnable() {
+        @Override
+        public void run() {
+            if (audioPlayerManager.isPlaying()) {
+                long pos = audioPlayerManager.getCurrentPosition();
+                long dur = audioPlayerManager.getDuration();
+                if (dur > 0) {
+                    float normalized = (float) pos / dur;
+                    waveformView.setPlayheadPosition(normalized);
+                }
+                playheadHandler.postDelayed(this, 50); // 20 FPS update
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -74,9 +105,11 @@ public class DJActivity extends Activity {
         // Initialize components
         executorService = Executors.newSingleThreadExecutor();
         mainHandler = new Handler(Looper.getMainLooper());
+        playheadHandler = new Handler(Looper.getMainLooper());
         trackList = new ArrayList<>();
         audioPlayerManager = new AudioPlayerManager();
         bpmDetector = new SimpleBPMDetector();
+        audioMixer = new AudioMixer();
 
         // Initialize UI
         initializeUI();
@@ -96,6 +129,16 @@ public class DJActivity extends Activity {
         tvCurrentTrack = findViewById(R.id.tvCurrentTrack);
         lvTrackList = findViewById(R.id.lvTrackList);
         waveformView = findViewById(R.id.waveformView);
+
+        // Setup waveform seek listener for draggable playhead
+        waveformView.setSeekListener(normalizedPosition -> {
+            long duration = audioPlayerManager.getDuration();
+            if (duration > 0) {
+                long seekPosition = (long)(normalizedPosition * duration);
+                audioPlayerManager.seekTo(seekPosition);
+                waveformView.setPlayheadPosition(normalizedPosition);
+            }
+        });
 
         // Setup track list adapter
         trackAdapter = new ArrayAdapter<>(this,
@@ -141,6 +184,38 @@ public class DJActivity extends Activity {
         btnPlay.setEnabled(false);
         btnPause.setEnabled(false);
         btnStop.setEnabled(false);
+
+        // Initialize Mixing UI
+        tvTrack1Selection = findViewById(R.id.tvTrack1Selection);
+        tvTrack2Selection = findViewById(R.id.tvTrack2Selection);
+        spinnerTransitionType = findViewById(R.id.spinnerTransitionType);
+        btnMix = findViewById(R.id.btnMix);
+        tvMixStatus = findViewById(R.id.tvMixStatus);
+
+        // Setup transition type spinner
+        String[] transitionTypes = {"DJ Transition", "Simple Crossfade", "Overlap"};
+        ArrayAdapter<String> spinnerAdapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, transitionTypes);
+        spinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinnerTransitionType.setAdapter(spinnerAdapter);
+
+        // Mix button listener
+        btnMix.setOnClickListener(v -> startMixing());
+
+        // Track selection toggle
+        tvTrack1Selection.setOnClickListener(v -> {
+            selectingTrack1 = true;
+            tvTrack1Selection.setBackgroundColor(0xFF90CAF9);  // Light blue
+            tvTrack2Selection.setBackgroundColor(0xFFE0E0E0);  // Gray
+            Toast.makeText(this, "Tap a track to set as Track 1", Toast.LENGTH_SHORT).show();
+        });
+
+        tvTrack2Selection.setOnClickListener(v -> {
+            selectingTrack1 = false;
+            tvTrack2Selection.setBackgroundColor(0xFF90CAF9);  // Light blue
+            tvTrack1Selection.setBackgroundColor(0xFFE0E0E0);  // Gray
+            Toast.makeText(this, "Tap a track to set as Track 2", Toast.LENGTH_SHORT).show();
+        });
     }
 
     private void checkPermissions() {
@@ -228,6 +303,9 @@ public class DJActivity extends Activity {
                     // Create track object
                     Track track = new Track(fileName, tempFile.getAbsolutePath(), bpm);
 
+                    // Note: Cue point detection skipped for performance
+                    // The mixer will use default 80% cue-out point
+
                     // Update UI on main thread
                     mainHandler.post(() -> {
                         // Add to list
@@ -305,7 +383,28 @@ public class DJActivity extends Activity {
 
     private void selectTrack(int position) {
         if (position >= 0 && position < trackList.size()) {
-            currentTrack = trackList.get(position);
+            Track selectedTrack = trackList.get(position);
+
+            // Handle mixing track selection
+            if (selectingTrack1) {
+                track1ForMix = selectedTrack;
+                tvTrack1Selection.setText(selectedTrack.getName());
+                selectingTrack1 = false;  // Auto-switch to Track 2
+                tvTrack1Selection.setBackgroundColor(0xFFE0E0E0);
+                tvTrack2Selection.setBackgroundColor(0xFF90CAF9);
+            } else {
+                track2ForMix = selectedTrack;
+                tvTrack2Selection.setText(selectedTrack.getName());
+                selectingTrack1 = true;  // Reset
+                tvTrack1Selection.setBackgroundColor(0xFFE0E0E0);
+                tvTrack2Selection.setBackgroundColor(0xFFE0E0E0);
+            }
+
+            // Enable mix button if both tracks selected
+            updateMixButtonState();
+
+            // Keep existing playback logic
+            currentTrack = selectedTrack;
             tvCurrentTrack.setText(currentTrack.getName());
             tvBPMValue.setText(String.format("%.1f", currentTrack.getBpm()));
 
@@ -323,11 +422,111 @@ public class DJActivity extends Activity {
         }
     }
 
+    private void updateMixButtonState() {
+        btnMix.setEnabled(track1ForMix != null && track2ForMix != null);
+    }
+
+    private void startMixing() {
+        if (track1ForMix == null || track2ForMix == null) {
+            Toast.makeText(this, "Please select two tracks", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Get transition type
+        int transitionType = spinnerTransitionType.getSelectedItemPosition();
+        String transitionName = (String) spinnerTransitionType.getSelectedItem();
+
+        // Show status
+        tvMixStatus.setVisibility(View.VISIBLE);
+        tvMixStatus.setText("Mixing: " + transitionName + "...");
+        btnMix.setEnabled(false);
+
+        // Stop any current playback
+        audioPlayerManager.stop();
+
+        // Perform mixing in background
+        executorService.execute(() -> {
+            try {
+                Log.d(TAG, "Starting mix operation...");
+                Log.d(TAG, "Track1 cue points - In: " + track1ForMix.getCueInSample() +
+                           ", Out: " + track1ForMix.getCueOutSample());
+                Log.d(TAG, "Track2 cue points - In: " + track2ForMix.getCueInSample() +
+                           ", Out: " + track2ForMix.getCueOutSample());
+
+                // Use the Track-based mix method which uses cue points
+                String outputPath = audioMixer.mix(
+                        track1ForMix,
+                        track2ForMix,
+                        transitionType,
+                        getCacheDir()
+                );
+
+                mainHandler.post(() -> {
+                    if (outputPath != null) {
+                        tvMixStatus.setText("Mix complete! Tap to play.");
+
+                        // Create a Track for the mixed result
+                        float avgBpm = (track1ForMix.getBpm() + track2ForMix.getBpm()) / 2;
+                        Track mixedTrack = new Track("Mixed Output", outputPath, avgBpm);
+
+                        // Add to track list
+                        trackList.add(mixedTrack);
+                        trackAdapter.add(String.format("%s - %.1f BPM",
+                                mixedTrack.getName(), mixedTrack.getBpm()));
+                        trackAdapter.notifyDataSetChanged();
+
+                        // Set as current and load for playback
+                        currentTrack = mixedTrack;
+                        tvCurrentTrack.setText(mixedTrack.getName());
+                        tvBPMValue.setText(String.format("%.1f", mixedTrack.getBpm()));
+
+                        try {
+                            audioPlayerManager.loadTrack(outputPath);
+                            btnPlay.setEnabled(true);
+                            btnStop.setEnabled(true);
+
+                            // Display cue markers from track1 (the transition point)
+                            if (track1ForMix.hasCuePoints()) {
+                                float cueOutNorm = track1ForMix.getCueOutNormalized();
+                                float fadeEndNorm = Math.min(cueOutNorm + 0.1f, 1.0f);
+                                waveformView.setCueMarkers(cueOutNorm, fadeEndNorm);
+                                Log.d(TAG, "Cue markers set after mix: out=" + cueOutNorm);
+                            }
+
+                            // Extract and display waveform for mixed track
+                            displayWaveform(new File(outputPath));
+
+                            Toast.makeText(DJActivity.this, "Mix complete! Press Play",
+                                    Toast.LENGTH_SHORT).show();
+                        } catch (IOException e) {
+                            Log.e(TAG, "Error loading mixed track", e);
+                        }
+                    } else {
+                        tvMixStatus.setText("Mixing failed");
+                        Toast.makeText(DJActivity.this, "Mixing failed",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                    btnMix.setEnabled(true);
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "Error during mixing", e);
+                mainHandler.post(() -> {
+                    tvMixStatus.setText("Error: " + e.getMessage());
+                    btnMix.setEnabled(true);
+                    Toast.makeText(DJActivity.this, "Error: " + e.getMessage(),
+                            Toast.LENGTH_LONG).show();
+                });
+            }
+        });
+    }
+
     private void playCurrentTrack() {
         if (currentTrack != null) {
             audioPlayerManager.play();
             btnPause.setEnabled(true);
             btnPlay.setEnabled(false);
+            // Start playhead updates
+            playheadHandler.post(playheadUpdater);
         }
     }
 
@@ -335,12 +534,17 @@ public class DJActivity extends Activity {
         audioPlayerManager.pause();
         btnPlay.setEnabled(true);
         btnPause.setEnabled(false);
+        // Stop playhead updates (keep position visible)
+        playheadHandler.removeCallbacks(playheadUpdater);
     }
 
     private void stopPlayback() {
         audioPlayerManager.stop();
         btnPlay.setEnabled(true);
         btnPause.setEnabled(false);
+        // Stop playhead updates and reset position
+        playheadHandler.removeCallbacks(playheadUpdater);
+        waveformView.setPlayheadPosition(-1);  // Hide playhead
     }
 
     private void displayWaveform(File audioFile) {
@@ -372,10 +576,29 @@ public class DJActivity extends Activity {
                     return;
                 }
 
+                // Detect cue points from waveform (fast - no extra decoding)
+                long durationMs = audioPlayerManager.getDuration();
+                if (currentTrack != null && currentTrack.getBpm() > 0 && durationMs > 0) {
+                    try {
+                        SimpleBPMDetector.CuePoints cues = bpmDetector.findCuePointsFromWaveform(
+                                waveformData, currentTrack.getBpm(), durationMs);
+                        currentTrack.setCueInSample(cues.cueInSample);
+                        currentTrack.setCueOutSample(cues.cueOutSample);
+                        currentTrack.setTotalSamples((long)(durationMs * 44.1f));
+                        Log.d(TAG, "Fast cue points detected - In: " + cues.cueInSample + ", Out: " + cues.cueOutSample);
+                    } catch (Exception e) {
+                        Log.w(TAG, "Cue point detection failed", e);
+                    }
+                }
+
                 // Update waveform view on UI thread
                 mainHandler.post(() -> {
                     waveformView.setWaveformData(waveformData);
                     Log.d(TAG, "Waveform displayed with " + waveformData.length + " points");
+
+                    // Clear cue markers when loading a track (markers only shown after mix)
+                    waveformView.clearMarkers();
+
                     Toast.makeText(DJActivity.this, "Waveform loaded!", Toast.LENGTH_SHORT).show();
                 });
             } catch (Exception e) {
@@ -390,6 +613,10 @@ public class DJActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        // Stop playhead updates
+        if (playheadHandler != null) {
+            playheadHandler.removeCallbacks(playheadUpdater);
+        }
         audioPlayerManager.release();
         executorService.shutdown();
     }

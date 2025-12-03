@@ -5,6 +5,8 @@ import android.media.MediaExtractor;
 import android.media.MediaFormat;
 import android.util.Log;
 
+import org.jtransforms.fft.FloatFFT_1D;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -39,6 +41,20 @@ public class SimpleBPMDetector {
         }
     }
 
+    /**
+     * Container for cue point detection results.
+     * Cue points are sample positions optimal for DJ transitions.
+     */
+    public static class CuePoints {
+        public final long cueInSample;   // Where to start mixing in (for incoming track)
+        public final long cueOutSample;  // Where to start fading out (for outgoing track)
+
+        public CuePoints(long cueIn, long cueOut) {
+            this.cueInSample = cueIn;
+            this.cueOutSample = cueOut;
+        }
+    }
+
     public SimpleBPMDetector() {
         // Constructor
     }
@@ -47,15 +63,49 @@ public class SimpleBPMDetector {
         Log.d(TAG, "Detecting BPM for: " + filePath);
 
         try {
-            // Step 1: Decode audio file to PCM
+            // Step 1: Decode audio file to PCM (only 5 seconds for fast BPM detection)
             float[] audioSamples = decodeAudioFile(filePath);
             if (audioSamples == null || audioSamples.length == 0) {
                 Log.e(TAG, "Failed to decode audio");
                 return 175.0f;  // Default
             }
 
+            return detectBPMFromSamples(audioSamples, 44100);
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error detecting BPM", e);
+            return 175.0f;  // Default fallback
+        }
+    }
+
+    /**
+     * Detect BPM from already-decoded audio samples.
+     * Use this to avoid duplicate decoding when samples are already available.
+     *
+     * @param audioSamples Decoded audio samples (float array)
+     * @param sampleRate   Sample rate in Hz
+     * @return Detected BPM, or 175.0f on error
+     */
+    public float detectBPMFromSamples(float[] audioSamples, int sampleRate) {
+        Log.d(TAG, "Detecting BPM from " + audioSamples.length + " samples");
+
+        try {
+            if (audioSamples == null || audioSamples.length == 0) {
+                Log.e(TAG, "No audio samples provided");
+                return 175.0f;  // Default
+            }
+
+            // BPM detection only needs first ~5 seconds of audio
+            // Limit to 5 seconds worth of samples for efficiency
+            int maxSamples = sampleRate * 5 * 2;  // 5 seconds, stereo
+            float[] samples = audioSamples;
+            if (audioSamples.length > maxSamples) {
+                samples = new float[maxSamples];
+                System.arraycopy(audioSamples, 0, samples, 0, maxSamples);
+            }
+
             // Step 2: Compute onset strength
-            float[] onsetStrength = computeOnsetStrength(audioSamples, 44100);
+            float[] onsetStrength = computeOnsetStrength(samples, sampleRate);
 
             // Step 3: Apply half-wave rectification
             float[] onsetHWR = halfWaveRectify(onsetStrength);
@@ -64,21 +114,243 @@ public class SimpleBPMDetector {
             float[] autocorr = computeAutocorrelation(onsetHWR);
 
             // Step 5: Find best tempo using multi-harmonic scoring
-            float bpm = findBestTempo(autocorr, 44100);
+            float bpm = findBestTempo(autocorr, sampleRate);
 
             Log.d(TAG, "Detected BPM: " + bpm);
             return bpm;
 
         } catch (Exception e) {
-            Log.e(TAG, "Error detecting BPM", e);
+            Log.e(TAG, "Error detecting BPM from samples", e);
             return 175.0f;  // Default fallback
+        }
+    }
+
+    /**
+     * Fast cue point detection using pre-extracted waveform data.
+     * This avoids re-decoding the audio file.
+     *
+     * @param waveformData Pre-extracted waveform (amplitude values)
+     * @param bpm          Detected BPM of the track
+     * @param durationMs   Total track duration in milliseconds
+     * @return CuePoints with normalized positions (0.0 to 1.0)
+     */
+    public CuePoints findCuePointsFromWaveform(float[] waveformData, float bpm, long durationMs) {
+        Log.d(TAG, "Finding cue points from waveform, BPM=" + bpm + ", points=" + waveformData.length);
+
+        // Default fallback values
+        float defaultCueIn = 0.0f;
+        float defaultCueOut = 0.8f;
+
+        try {
+            if (waveformData == null || waveformData.length < 100 || bpm <= 0) {
+                Log.w(TAG, "Insufficient data for cue point detection");
+                return new CuePoints((long)(defaultCueIn * durationMs * 44.1f),
+                                    (long)(defaultCueOut * durationMs * 44.1f));
+            }
+
+            // Calculate bar dimensions in waveform points
+            float barDurationSec = 4 * 60.0f / bpm;  // 4 beats per bar
+            float trackDurationSec = durationMs / 1000.0f;
+            int pointsPerBar = (int) (waveformData.length * barDurationSec / trackDurationSec);
+            if (pointsPerBar < 1) pointsPerBar = 1;
+
+            int numBars = waveformData.length / pointsPerBar;
+            if (numBars < 8) {
+                Log.w(TAG, "Track too short: " + numBars + " bars");
+                return new CuePoints(0, (long)(defaultCueOut * durationMs * 44.1f));
+            }
+
+            // Compute per-bar energy (RMS of absolute waveform values)
+            float[] barEnergies = new float[numBars];
+            float totalEnergy = 0;
+            for (int bar = 0; bar < numBars; bar++) {
+                float sum = 0;
+                int start = bar * pointsPerBar;
+                int end = Math.min(start + pointsPerBar, waveformData.length);
+                for (int i = start; i < end; i++) {
+                    sum += Math.abs(waveformData[i]);
+                }
+                barEnergies[bar] = sum / (end - start);
+                totalEnergy += barEnergies[bar];
+            }
+            float meanEnergy = totalEnergy / numBars;
+
+            // Find cue-in: low energy bar ~30s in
+            int startSearchBar = Math.max(1, (int) (30.0f / barDurationSec));
+            startSearchBar = Math.min(startSearchBar, numBars / 4);
+
+            float cueInNorm = defaultCueIn;
+            for (int bar = startSearchBar; bar < Math.min(startSearchBar + 16, numBars / 2); bar++) {
+                if (barEnergies[bar] < 0.7f * meanEnergy) {
+                    // Also check next bar to avoid transient dips (matching Python)
+                    if (bar + 1 < numBars && barEnergies[bar + 1] < 0.8f * meanEnergy) {
+                        cueInNorm = (float) bar / numBars;
+                        Log.d(TAG, "Found cue-in at bar " + bar);
+                        break;
+                    }
+                }
+            }
+
+            // Find cue-out: high energy bar in second half
+            int endSearchBar = numBars - 16;  // Stop 16 bars before end (matching Python)
+            int startMidSearch = Math.max(numBars / 2, (int)(cueInNorm * numBars) + 8);
+
+            float cueOutNorm = defaultCueOut;
+            for (int bar = startMidSearch; bar < endSearchBar; bar++) {
+                if (barEnergies[bar] > meanEnergy) {
+                    cueOutNorm = (float) bar / numBars;
+                    Log.d(TAG, "Found cue-out at bar " + bar);
+                    break;
+                }
+            }
+
+            // Ensure minimum 8 bars between cue-in and cue-out (matching Python)
+            int cueInBar = (int)(cueInNorm * numBars);
+            int cueOutBar = (int)(cueOutNorm * numBars);
+            if (cueOutBar - cueInBar < 8) {
+                cueOutNorm = Math.min((float)(cueInBar + 8) / numBars, defaultCueOut);
+                Log.d(TAG, "Adjusted cue-out to ensure minimum 8-bar gap");
+            }
+
+            // Convert to sample positions (assuming 44100 Hz)
+            long totalSamples = (long) (durationMs * 44.1f);
+            long cueInSample = (long) (cueInNorm * totalSamples);
+            long cueOutSample = (long) (cueOutNorm * totalSamples);
+
+            Log.d(TAG, "Cue points: in=" + cueInNorm + ", out=" + cueOutNorm);
+            return new CuePoints(cueInSample, cueOutSample);
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error in fast cue point detection", e);
+            long totalSamples = (long) (durationMs * 44.1f);
+            return new CuePoints(0, (long)(defaultCueOut * totalSamples));
+        }
+    }
+
+    /**
+     * Find optimal cue points for DJ transitions based on energy analysis.
+     *
+     * Algorithm (ported from Python AutoDJ):
+     * 1. Compute RMS energy per bar using onset strength frames
+     * 2. Cue-In: Find low-energy bar (< 0.7× mean) starting ~30s into track
+     * 3. Cue-Out: Find high-energy bar (> mean) in second half
+     * 4. Both snap to bar boundaries
+     *
+     * @param audioSamples Full decoded audio samples
+     * @param sampleRate   Sample rate in Hz
+     * @param bpm          Detected BPM of the track
+     * @return CuePoints with sample positions, or defaults if detection fails
+     */
+    public CuePoints findCuePoints(float[] audioSamples, int sampleRate, float bpm) {
+        Log.d(TAG, "Finding cue points for BPM=" + bpm + ", samples=" + audioSamples.length);
+
+        // Default fallback values (80% point for cue-out, matching current mixer behavior)
+        long defaultCueIn = 0;
+        long defaultCueOut = (long) (audioSamples.length * 0.8f);
+
+        try {
+            if (audioSamples == null || audioSamples.length == 0) {
+                Log.w(TAG, "No audio samples provided for cue point detection");
+                return new CuePoints(defaultCueIn, defaultCueOut);
+            }
+
+            // Step 1: Compute onset strength (RMS energy per frame)
+            float[] onsetStrength = computeOnsetStrength(audioSamples, sampleRate);
+            if (onsetStrength.length < 10) {
+                Log.w(TAG, "Track too short for cue point detection");
+                return new CuePoints(defaultCueIn, defaultCueOut);
+            }
+
+            // Step 2: Calculate bar dimensions
+            // Bar duration in seconds (4 beats per bar in 4/4 time)
+            float barDurationSec = 4 * 60.0f / bpm;
+            // Samples per bar
+            int barDurationSamples = (int) (barDurationSec * sampleRate);
+            // Frames per bar (onset strength uses HOP_LENGTH hop size)
+            int framesPerBar = barDurationSamples / HOP_LENGTH;
+            if (framesPerBar < 1) framesPerBar = 1;
+
+            // Calculate number of complete bars
+            int numBars = onsetStrength.length / framesPerBar;
+            if (numBars < 4) {
+                Log.w(TAG, "Track has only " + numBars + " bars, using defaults");
+                return new CuePoints(defaultCueIn, defaultCueOut);
+            }
+
+            Log.d(TAG, "Bar analysis: " + numBars + " bars, " + framesPerBar + " frames/bar");
+
+            // Step 3: Compute per-bar energy
+            float[] barEnergies = new float[numBars];
+            float totalEnergy = 0;
+            for (int bar = 0; bar < numBars; bar++) {
+                float sum = 0;
+                int frameStart = bar * framesPerBar;
+                int frameEnd = Math.min(frameStart + framesPerBar, onsetStrength.length);
+                for (int f = frameStart; f < frameEnd; f++) {
+                    sum += onsetStrength[f];
+                }
+                barEnergies[bar] = sum / (frameEnd - frameStart);
+                totalEnergy += barEnergies[bar];
+            }
+            float meanEnergy = totalEnergy / numBars;
+            Log.d(TAG, "Mean bar energy: " + meanEnergy);
+
+            // Step 4: Find cue-in point (low energy bar, ~30s into track)
+            // Start searching from ~30 seconds in
+            int startSearchBar = Math.max(1, (int) (30.0f / barDurationSec));
+            startSearchBar = Math.min(startSearchBar, numBars / 4);  // Don't start past first quarter
+
+            long cueInSample = defaultCueIn;
+            for (int bar = startSearchBar; bar < Math.min(startSearchBar + 16, numBars / 2); bar++) {
+                // Look for low energy bar (< 0.7 × mean) - indicates breakdown/intro section
+                if (barEnergies[bar] < 0.7f * meanEnergy) {
+                    // Also check next bar to avoid transient dips
+                    if (bar + 1 < numBars && barEnergies[bar + 1] < 0.8f * meanEnergy) {
+                        cueInSample = (long) (bar * barDurationSec * sampleRate);
+                        Log.d(TAG, "Found cue-in at bar " + bar + " (energy=" + barEnergies[bar] + ")");
+                        break;
+                    }
+                }
+            }
+
+            // Step 5: Find cue-out point (high energy bar in second half)
+            int endSearchBar = numBars - 16;  // Stop 16 bars before end
+            int startMidSearch = Math.max(numBars / 2, (int) (cueInSample / (barDurationSec * sampleRate)) + 8);
+
+            long cueOutSample = defaultCueOut;
+            for (int bar = startMidSearch; bar < endSearchBar && bar < numBars - 4; bar++) {
+                // Look for high energy bar (> mean) - indicates main section
+                if (barEnergies[bar] > meanEnergy) {
+                    cueOutSample = (long) (bar * barDurationSec * sampleRate);
+                    Log.d(TAG, "Found cue-out at bar " + bar + " (energy=" + barEnergies[bar] + ")");
+                    break;
+                }
+            }
+
+            // Ensure minimum 8 bars between cue-in and cue-out
+            float minGapSamples = 8 * barDurationSec * sampleRate;
+            if (cueOutSample - cueInSample < minGapSamples) {
+                cueOutSample = Math.min((long) (cueInSample + minGapSamples), defaultCueOut);
+                Log.d(TAG, "Adjusted cue-out to ensure minimum gap");
+            }
+
+            Log.d(TAG, "Final cue points: in=" + cueInSample + ", out=" + cueOutSample);
+            return new CuePoints(cueInSample, cueOutSample);
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error finding cue points", e);
+            return new CuePoints(defaultCueIn, defaultCueOut);
         }
     }
 
     private float[] decodeAudioFile(String filePath) {
         MediaExtractor extractor = new MediaExtractor();
         MediaCodec decoder = null;
-        List<Float> allSamples = new ArrayList<>();
+
+        // Pre-allocate buffer: 5s × 48000Hz × 2 channels (enough for BPM detection)
+        final int ESTIMATED_SAMPLES = 5 * 48000 * 2;
+        float[] sampleBuffer = new float[ESTIMATED_SAMPLES];
+        int sampleCount = 0;
 
         try {
             extractor.setDataSource(filePath);
@@ -113,8 +385,8 @@ public class SimpleBPMDetector {
             boolean isEOS = false;
             long timeoutUs = 10000;
 
-            // Limit to first 30 seconds for BPM detection
-            long maxDurationUs = 30_000_000;  // 30 seconds in microseconds
+            // Limit to first 5 seconds for BPM detection (sufficient for D&B 160-190 BPM)
+            long maxDurationUs = 5_000_000;  // 5 seconds in microseconds
 
             while (!isEOS) {
                 // Input
@@ -143,17 +415,16 @@ public class SimpleBPMDetector {
                 while (outputIndex >= 0) {
                     ByteBuffer outputBuffer = decoder.getOutputBuffer(outputIndex);
 
-                    // Convert to float samples
+                    // Convert to float samples - directly to pre-allocated buffer
                     if (outputBuffer != null && info.size > 0) {
                         outputBuffer.order(ByteOrder.LITTLE_ENDIAN);
                         outputBuffer.rewind();
 
                         // Assuming 16-bit PCM
                         ShortBuffer shortBuffer = outputBuffer.asShortBuffer();
-                        while (shortBuffer.hasRemaining()) {
+                        while (shortBuffer.hasRemaining() && sampleCount < sampleBuffer.length) {
                             short sample = shortBuffer.get();
-                            float normalizedSample = sample / 32768.0f;
-                            allSamples.add(normalizedSample);
+                            sampleBuffer[sampleCount++] = sample / 32768.0f;
                         }
                     }
 
@@ -179,11 +450,9 @@ public class SimpleBPMDetector {
             extractor.release();
         }
 
-        // Convert to array
-        float[] samples = new float[allSamples.size()];
-        for (int i = 0; i < allSamples.size(); i++) {
-            samples[i] = allSamples.get(i);
-        }
+        // Trim buffer to actual size
+        float[] samples = new float[sampleCount];
+        System.arraycopy(sampleBuffer, 0, samples, 0, sampleCount);
 
         Log.d(TAG, "Decoded " + samples.length + " samples");
         return samples;
@@ -242,23 +511,49 @@ public class SimpleBPMDetector {
         return averaged;
     }
 
+    /**
+     * Compute autocorrelation using FFT (Wiener-Khinchin theorem).
+     * This is O(n log n) instead of O(n²) for the direct method.
+     *
+     * Autocorrelation(x) = IFFT(|FFT(x)|²)
+     */
     private float[] computeAutocorrelation(float[] signal) {
-        // Compute autocorrelation for all lags up to signal length
-        int maxLag = Math.min(signal.length, 1000);  // Limit for performance
+        // Pad to next power of 2 for efficient FFT
+        int n = signal.length;
+        int fftSize = 1;
+        while (fftSize < n * 2) {
+            fftSize *= 2;
+        }
+
+        // Create zero-padded array for FFT (JTransforms uses interleaved real/imag)
+        float[] fftData = new float[fftSize * 2];
+        System.arraycopy(signal, 0, fftData, 0, n);
+
+        // Perform forward FFT
+        FloatFFT_1D fft = new FloatFFT_1D(fftSize);
+        fft.realForwardFull(fftData);
+
+        // Compute power spectrum: |FFT(x)|²
+        // fftData is interleaved [re0, im0, re1, im1, ...]
+        for (int i = 0; i < fftSize; i++) {
+            float re = fftData[2 * i];
+            float im = fftData[2 * i + 1];
+            float power = re * re + im * im;
+            fftData[2 * i] = power;
+            fftData[2 * i + 1] = 0;  // Imaginary part is 0 for power spectrum
+        }
+
+        // Perform inverse FFT
+        fft.complexInverse(fftData, true);
+
+        // Extract real part (autocorrelation) and normalize
+        int maxLag = Math.min(n, 1000);  // Same limit as before
         float[] autocorr = new float[maxLag];
+        float normFactor = fftData[0] > 0 ? 1.0f / fftData[0] : 1.0f;
 
-        for (int lag = 0; lag < maxLag; lag++) {
-            float sum = 0;
-            int count = 0;
-
-            for (int i = 0; i < signal.length - lag; i++) {
-                sum += signal[i] * signal[i + lag];
-                count++;
-            }
-
-            if (count > 0) {
-                autocorr[lag] = sum / count;
-            }
+        for (int i = 0; i < maxLag; i++) {
+            // Real part is at even indices
+            autocorr[i] = fftData[2 * i] * normFactor;
         }
 
         return autocorr;

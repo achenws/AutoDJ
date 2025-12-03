@@ -92,16 +92,134 @@
     <ListView
         android:id="@+id/lvTrackList"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
+        android:layout_height="120dp"
         android:divider="#CCCCCC"
         android:dividerHeight="1dp" />
+
+    <!-- Mix Section Divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#CCCCCC"
+        android:layout_marginTop="10dp"
+        android:layout_marginBottom="10dp" />
+
+    <!-- Mix Section Title -->
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Mix Tracks"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="10dp" />
+
+    <!-- Track Selection Row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="10dp">
+
+        <!-- Track 1 Selection -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginEnd="5dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Track 1:"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tvTrack1Selection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Tap track above"
+                android:textSize="14sp"
+                android:background="#E0E0E0"
+                android:padding="8dp"
+                android:singleLine="true"
+                android:ellipsize="end" />
+        </LinearLayout>
+
+        <!-- Track 2 Selection -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginStart="5dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Track 2:"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tvTrack2Selection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Tap track above"
+                android:textSize="14sp"
+                android:background="#E0E0E0"
+                android:padding="8dp"
+                android:singleLine="true"
+                android:ellipsize="end" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Transition Type Spinner -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="10dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Transition:"
+            android:textSize="14sp"
+            android:layout_marginEnd="10dp" />
+
+        <Spinner
+            android:id="@+id/spinnerTransitionType"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1" />
+    </LinearLayout>
+
+    <!-- Mix Button -->
+    <Button
+        android:id="@+id/btnMix"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Mix Tracks"
+        android:textSize="16sp"
+        android:enabled="false"
+        android:layout_marginBottom="10dp" />
+
+    <!-- Mix Status -->
+    <TextView
+        android:id="@+id/tvMixStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textSize="14sp"
+        android:gravity="center"
+        android:visibility="gone" />
 
     <!-- Waveform Visualization -->
     <com.ece420.lab1.WaveformView
         android:id="@+id/waveformView"
         android:layout_width="match_parent"
-        android:layout_height="200dp"
+        android:layout_height="100dp"
         android:layout_marginTop="10dp" />
 
 </LinearLayout>
