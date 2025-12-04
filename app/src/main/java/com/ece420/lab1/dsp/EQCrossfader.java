@@ -1,5 +1,7 @@
 package com.ece420.lab1.dsp;
 
+import android.util.Log;
+
 import java.util.Arrays;
 
 /**
@@ -12,8 +14,11 @@ import java.util.Arrays;
  * - Outgoing track gets progressive high-pass filter (removes bass as it fades)
  * - Incoming track starts with low-pass filter that opens up
  * - Linear volume fades with loudness compensation
+ * - RMS-based volume normalization ensures consistent loudness
  */
 public class EQCrossfader {
+
+    private static final String TAG = "EQCrossfader";
 
     // Default parameters matching Python implementation
     private static final int DEFAULT_SAMPLE_RATE = 44100;
@@ -24,7 +29,12 @@ public class EQCrossfader {
     private static final float HP_END_FREQ = 200.0f;
     private static final float LP_START_FREQ = 200.0f;
 
+    // RMS normalization target (typical music level)
+    private static final float TARGET_RMS = 0.15f;
+    private static final float MAX_GAIN = 4.0f;  // Limit to prevent excessive amplification
+
     private int sampleRate;
+    private float targetRMS = TARGET_RMS;
 
     /**
      * Create a crossfader with default sample rate (44100 Hz).
@@ -40,6 +50,91 @@ public class EQCrossfader {
      */
     public EQCrossfader(int sampleRate) {
         this.sampleRate = sampleRate;
+    }
+
+    /**
+     * Calculate RMS (root mean square) loudness of audio segment.
+     * RMS represents the average power/loudness of the audio signal.
+     *
+     * @param audio  Audio samples
+     * @param start  Start index
+     * @param length Number of samples to analyze
+     * @return RMS value (0.0 to 1.0 typical range)
+     */
+    private float calculateRMS(float[] audio, int start, int length) {
+        if (audio == null || length <= 0 || start + length > audio.length) {
+            return 0.0f;
+        }
+
+        double sumSquares = 0.0;
+        for (int i = start; i < start + length; i++) {
+            sumSquares += audio[i] * audio[i];
+        }
+        return (float) Math.sqrt(sumSquares / length);
+    }
+
+    /**
+     * Calculate RMS of entire audio buffer.
+     *
+     * @param audio Audio samples
+     * @return RMS value
+     */
+    public float calculateRMS(float[] audio) {
+        return calculateRMS(audio, 0, audio.length);
+    }
+
+    /**
+     * Normalize audio to target RMS level.
+     * Adjusts the gain so the audio has consistent perceived loudness.
+     *
+     * @param audio     Audio samples (modified in-place)
+     * @param targetRMS Desired RMS level (e.g., 0.15 for typical music)
+     * @return The gain factor applied
+     */
+    public float normalizeToRMS(float[] audio, float targetRMS) {
+        float currentRMS = calculateRMS(audio);
+
+        if (currentRMS < 1e-6f) {  // Avoid division by zero (silence)
+            Log.w(TAG, "Audio is silent (RMS < 1e-6), skipping normalization");
+            return 1.0f;
+        }
+
+        float gain = targetRMS / currentRMS;
+
+        // Limit gain to prevent excessive amplification and clipping
+        if (gain > MAX_GAIN) {
+            Log.w(TAG, String.format("Gain %.2f exceeds max %.2f, limiting", gain, MAX_GAIN));
+            gain = MAX_GAIN;
+        }
+
+        // Apply gain
+        for (int i = 0; i < audio.length; i++) {
+            audio[i] *= gain;
+        }
+
+        Log.d(TAG, String.format("RMS normalization: %.4f -> %.4f (gain: %.2fx)",
+                currentRMS, targetRMS, gain));
+
+        return gain;
+    }
+
+    /**
+     * Set the target RMS level for normalization.
+     * Default is 0.15 (typical music level).
+     *
+     * @param targetRMS Target RMS level (0.0 to 1.0)
+     */
+    public void setTargetRMS(float targetRMS) {
+        this.targetRMS = targetRMS;
+    }
+
+    /**
+     * Get the current target RMS level.
+     *
+     * @return Target RMS level
+     */
+    public float getTargetRMS() {
+        return targetRMS;
     }
 
     /**
@@ -60,6 +155,17 @@ public class EQCrossfader {
         // Create working copies of the fade regions
         float[] fadeOut = Arrays.copyOf(outgoing, fadeLen);
         float[] fadeIn = Arrays.copyOf(incoming, fadeLen);
+
+        // **RMS-based volume matching BEFORE crossfade**
+        // This ensures both tracks have consistent perceived loudness
+        float rmsOut = calculateRMS(fadeOut);
+        float rmsIn = calculateRMS(fadeIn);
+
+        Log.d(TAG, String.format("Pre-normalization RMS: outgoing=%.4f, incoming=%.4f", rmsOut, rmsIn));
+
+        // Normalize both tracks to the target RMS level
+        normalizeToRMS(fadeOut, targetRMS);
+        normalizeToRMS(fadeIn, targetRMS);
 
         int numSegments = DEFAULT_NUM_SEGMENTS;
         int segmentLen = fadeLen / numSegments;
@@ -149,12 +255,26 @@ public class EQCrossfader {
         int fadeLen = Math.min(fadeDurationSamples,
                 Math.min(outgoing.length, incoming.length));
 
+        // Create working copies
+        float[] fadeOut = Arrays.copyOf(outgoing, fadeLen);
+        float[] fadeIn = Arrays.copyOf(incoming, fadeLen);
+
+        // **RMS-based volume matching BEFORE crossfade**
+        float rmsOut = calculateRMS(fadeOut);
+        float rmsIn = calculateRMS(fadeIn);
+
+        Log.d(TAG, String.format("Simple crossfade - Pre-normalization RMS: outgoing=%.4f, incoming=%.4f", rmsOut, rmsIn));
+
+        // Normalize both tracks to the target RMS level
+        normalizeToRMS(fadeOut, targetRMS);
+        normalizeToRMS(fadeIn, targetRMS);
+
         float[] mixed = new float[fadeLen];
         for (int i = 0; i < fadeLen; i++) {
             float fadeOutLevel = 1.0f - (float) i / fadeLen;
             float fadeInLevel = (float) i / fadeLen;
 
-            mixed[i] = outgoing[i] * fadeOutLevel + incoming[i] * fadeInLevel;
+            mixed[i] = fadeOut[i] * fadeOutLevel + fadeIn[i] * fadeInLevel;
         }
 
         // Append rest of incoming track
@@ -224,5 +344,30 @@ public class EQCrossfader {
      */
     public int calculateFadeDuration(float seconds) {
         return (int) (seconds * sampleRate);
+    }
+
+    /**
+     * Apply hard limiter to prevent clipping.
+     * Clips any samples exceeding the threshold to prevent distortion.
+     *
+     * @param audio     Audio samples (modified in-place)
+     * @param threshold Maximum allowed amplitude (typically 0.95 to 1.0)
+     */
+    public void applyPeakLimiter(float[] audio, float threshold) {
+        int clippedCount = 0;
+        for (int i = 0; i < audio.length; i++) {
+            if (audio[i] > threshold) {
+                audio[i] = threshold;
+                clippedCount++;
+            } else if (audio[i] < -threshold) {
+                audio[i] = -threshold;
+                clippedCount++;
+            }
+        }
+
+        if (clippedCount > 0) {
+            Log.d(TAG, String.format("Peak limiter: clipped %d samples (%.2f%%)",
+                    clippedCount, 100.0f * clippedCount / audio.length));
+        }
     }
 }

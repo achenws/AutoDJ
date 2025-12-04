@@ -197,7 +197,6 @@ public class AudioMixer {
             float[] bpmSamples1 = new float[bpmSampleCount];
             reader1.readSamples(bpmSamples1, 0, bpmSampleCount);
             float bpm1 = bpmDetector.detectBPMFromSamples(bpmSamples1, sampleRate);
-            bpmSamples1 = null; // Allow GC
 
             // Reopen reader1 for later streaming
             reader1.close();
@@ -208,9 +207,31 @@ public class AudioMixer {
             float[] bpmSamples2 = new float[bpmSampleCount2];
             reader2.readSamples(bpmSamples2, 0, bpmSampleCount2);
             float bpm2 = bpmDetector.detectBPMFromSamples(bpmSamples2, sampleRate);
-            bpmSamples2 = null; // Allow GC
 
             Log.d(TAG, "BPM: Track1=" + bpm1 + ", Track2=" + bpm2);
+
+            // Step 1.5: Generate beat grids for downbeat alignment (NEW!)
+            // We only need the beat grid for track 1 to snap the transition point
+            // Beat grid is calculated from BPM + phase, extrapolated to full track duration
+            SimpleBPMDetector.BeatGrid beatGrid1 = null;
+            try {
+                Log.d(TAG, "Generating beat grid for track 1 (for downbeat alignment)...");
+
+                // Generate full beat grid using detected BPM and track duration
+                float track1DurationSec = track1Samples / (float)(sampleRate * channels);
+                beatGrid1 = generateBeatGridForDuration(
+                        bpm1, track1DurationSec, bpmSamples1, sampleRate);
+
+                Log.d(TAG, String.format("Beat grid generated: %d downbeats for %.1f second track",
+                        beatGrid1.downbeats.length, track1DurationSec));
+            } catch (Exception e) {
+                Log.e(TAG, "Error generating beat grid, will skip downbeat alignment", e);
+                beatGrid1 = null;
+            }
+
+            // Now allow GC of BPM samples after beat grid generation
+            bpmSamples1 = null;
+            bpmSamples2 = null;
 
             // Step 2: Calculate fade region parameters
             int fadeSamples = crossfader.calculateFadeDuration(DJ_FADE_BARS, TARGET_BPM, 4);
@@ -221,10 +242,26 @@ public class AudioMixer {
             long transitionPoint;
             if (track1CueOut > 0) {
                 transitionPoint = track1CueOut;
-                Log.d(TAG, "Using detected cue-out point: " + transitionPoint);
+                Log.d(TAG, "Using detected cue-out point (before snap): " + transitionPoint);
+
+                // **NEW: Snap to nearest downbeat for musical alignment (if available)**
+                if (beatGrid1 != null && beatGrid1.downbeats != null && beatGrid1.downbeats.length > 0) {
+                    transitionPoint = snapToNearestDownbeat(transitionPoint, beatGrid1.downbeats, sampleRate, channels);
+                    Log.d(TAG, "Snapped to downbeat: " + transitionPoint);
+                } else {
+                    Log.w(TAG, "Beat grid not available, using unaligned cue point");
+                }
             } else {
                 transitionPoint = (long)(track1Samples * 0.8f);
                 Log.d(TAG, "Using default 80% transition point: " + transitionPoint);
+
+                // **NEW: Snap default position too (if available)**
+                if (beatGrid1 != null && beatGrid1.downbeats != null && beatGrid1.downbeats.length > 0) {
+                    transitionPoint = snapToNearestDownbeat(transitionPoint, beatGrid1.downbeats, sampleRate, channels);
+                    Log.d(TAG, "Snapped default to downbeat: " + transitionPoint);
+                } else {
+                    Log.w(TAG, "Beat grid not available, using unaligned default point");
+                }
             }
             transitionPoint = Math.max(0, transitionPoint - fadeSamples);
 
@@ -296,8 +333,13 @@ public class AudioMixer {
             writer = new StreamingWavWriter();
             writer.open(outputPath, sampleRate, channels);
 
-            // Phase 7a: Stream pre-transition from track 1 (no stretching)
-            Log.d(TAG, "Writing pre-transition from track 1...");
+            // **Calculate target RMS from the crossfaded region**
+            // This ensures consistent volume throughout the entire mix
+            float targetRMS = crossfader.calculateRMS(crossfaded);
+            Log.d(TAG, String.format("Target RMS for entire mix: %.4f", targetRMS));
+
+            // Phase 7a: Stream pre-transition from track 1 (with RMS normalization)
+            Log.d(TAG, "Writing pre-transition from track 1 (normalized)...");
             reader1.close();
             reader1 = new AudioChunkReader(track1Path);
             long samplesWritten = 0;
@@ -307,21 +349,30 @@ public class AudioMixer {
 
                 long remaining = transitionPoint - samplesWritten;
                 if (chunk.length <= remaining) {
+                    // **Apply RMS normalization to match crossfade region**
+                    crossfader.normalizeToRMS(chunk, targetRMS);
+                    // **Apply peak limiter to prevent clipping after gain boost**
+                    crossfader.applyPeakLimiter(chunk, 0.95f);
                     writer.writeChunk(chunk);
                     samplesWritten += chunk.length;
                 } else {
-                    writer.writeChunk(chunk, 0, (int)remaining);
+                    // **Normalize partial chunk**
+                    float[] partial = new float[(int)remaining];
+                    System.arraycopy(chunk, 0, partial, 0, (int)remaining);
+                    crossfader.normalizeToRMS(partial, targetRMS);
+                    crossfader.applyPeakLimiter(partial, 0.95f);
+                    writer.writeChunk(partial);
                     samplesWritten += remaining;
                 }
             }
 
-            // Phase 7b: Write crossfaded region
+            // Phase 7b: Write crossfaded region (already at target RMS)
             Log.d(TAG, "Writing crossfaded region...");
-            DSPUtils.normalize(crossfaded, 0.95f);
+            crossfader.applyPeakLimiter(crossfaded, 0.95f);
             writer.writeChunk(crossfaded);
 
-            // Phase 7c: Stream rest of track 2 (skip cue-in + fade-in portion)
-            Log.d(TAG, "Writing rest of track 2...");
+            // Phase 7c: Stream rest of track 2 (with RMS normalization)
+            Log.d(TAG, "Writing rest of track 2 (normalized)...");
             reader2.close();
             reader2 = new AudioChunkReader(track2Path);
             // Skip to position after fade: cue-in point + fade samples
@@ -330,6 +381,10 @@ public class AudioMixer {
             Log.d(TAG, "Skipping to sample " + track2SkipTo + " in track 2");
             float[] chunk;
             while ((chunk = reader2.readNextChunk()) != null) {
+                // **Apply RMS normalization to match crossfade region**
+                crossfader.normalizeToRMS(chunk, targetRMS);
+                // **Apply peak limiter to prevent clipping after gain boost**
+                crossfader.applyPeakLimiter(chunk, 0.95f);
                 writer.writeChunk(chunk);
             }
 
@@ -357,6 +412,89 @@ public class AudioMixer {
         float[] result = new float[length];
         System.arraycopy(array, 0, result, 0, length);
         return result;
+    }
+
+    /**
+     * Generate a full beat grid for the entire track duration.
+     * Detects phase from sample audio, then extrapolates beats to full duration.
+     *
+     * @param bpm              Detected BPM
+     * @param durationSec      Full track duration in seconds
+     * @param sampleAudio      Sample audio for phase detection (e.g., first 30s)
+     * @param sampleRate       Sample rate in Hz
+     * @return BeatGrid with beats and downbeats for full track
+     */
+    private SimpleBPMDetector.BeatGrid generateBeatGridForDuration(
+            float bpm, float durationSec, float[] sampleAudio, int sampleRate) {
+
+        // Detect phase from sample audio
+        SimpleBPMDetector.BeatGrid sampleGrid = bpmDetector.detectBeatGrid(sampleAudio, sampleRate);
+        float phase = sampleGrid.phase;
+
+        // Generate beats for full duration
+        float period = 60.0f / bpm;  // Seconds per beat
+        java.util.List<Float> beatList = new java.util.ArrayList<>();
+        float beatTime = phase;
+
+        while (beatTime < durationSec) {
+            beatList.add(beatTime);
+            beatTime += period;
+        }
+
+        // Convert to array
+        float[] beats = new float[beatList.size()];
+        for (int i = 0; i < beatList.size(); i++) {
+            beats[i] = beatList.get(i);
+        }
+
+        // Detect downbeats (every 4th beat)
+        int numDownbeats = beats.length / 4;
+        float[] downbeats = new float[numDownbeats];
+        for (int i = 0; i < numDownbeats; i++) {
+            downbeats[i] = beats[i * 4];
+        }
+
+        return new SimpleBPMDetector.BeatGrid(beats, downbeats, bpm, phase);
+    }
+
+    /**
+     * Snap a sample position to the nearest downbeat for musical alignment.
+     * This ensures transitions happen on bar boundaries (every 4 beats).
+     *
+     * @param samplePos   Sample position to snap
+     * @param downbeats   Array of downbeat timestamps (in seconds)
+     * @param sampleRate  Sample rate in Hz
+     * @param channels    Number of audio channels
+     * @return Snapped sample position on nearest downbeat
+     */
+    private long snapToNearestDownbeat(long samplePos, float[] downbeats, int sampleRate, int channels) {
+        if (downbeats == null || downbeats.length == 0) {
+            Log.w(TAG, "No downbeats available, using original position");
+            return samplePos;
+        }
+
+        // Convert sample position to seconds
+        float timeSec = samplePos / (float) (sampleRate * channels);
+
+        // Find nearest downbeat
+        float nearestDownbeat = downbeats[0];
+        float minDiff = Math.abs(timeSec - downbeats[0]);
+
+        for (float downbeat : downbeats) {
+            float diff = Math.abs(timeSec - downbeat);
+            if (diff < minDiff) {
+                minDiff = diff;
+                nearestDownbeat = downbeat;
+            }
+        }
+
+        // Convert back to sample position
+        long snappedPos = (long) (nearestDownbeat * sampleRate * channels);
+
+        Log.d(TAG, String.format("Snap alignment: %.2fs → %.2fs (diff: %.3fs, %.1f beats at 175 BPM)",
+                timeSec, nearestDownbeat, minDiff, minDiff * 175.0f / 60.0f));
+
+        return snappedPos;
     }
 
     /**
@@ -476,28 +614,13 @@ public class AudioMixer {
             writer = new StreamingWavWriter();
             writer.open(outputPath, actualSampleRate, actualChannels);
 
-            // Phase 1: Write track 1 until transition point
-            Log.d(TAG, "Phase 1: Writing pre-transition from track 1...");
-            long samplesWritten = 0;
-            while (samplesWritten < transitionPoint) {
-                float[] chunk = reader1.readNextChunk();
-                if (chunk == null) break;
-
-                long remaining = transitionPoint - samplesWritten;
-                if (chunk.length <= remaining) {
-                    writer.writeChunk(chunk);
-                    samplesWritten += chunk.length;
-                } else {
-                    // Partial write
-                    writer.writeChunk(chunk, 0, (int) remaining);
-                    samplesWritten += remaining;
-                }
-            }
-
-            // Phase 2: Read fade regions and crossfade
-            Log.d(TAG, "Phase 2: Crossfading...");
+            // Phase 2: Read fade regions and crossfade FIRST (to determine target RMS)
+            Log.d(TAG, "Phase 2: Reading fade regions and crossfading...");
             float[] fadeOut = new float[fadeSamples];
             float[] fadeIn = new float[fadeSamples];
+
+            // Skip to transition point in track 1
+            reader1.skip(transitionPoint);
 
             // Read fade-out from track 1
             int fadeOutRead = 0;
@@ -519,15 +642,50 @@ public class AudioMixer {
                 fadeInRead += toCopy;
             }
 
-            // Perform crossfade
+            // Perform crossfade (this applies RMS normalization internally)
             int actualFadeLen = Math.min(fadeOutRead, fadeInRead);
             float[] crossfaded = crossfader.simpleCrossfade(fadeOut, fadeIn, actualFadeLen);
+
+            // Calculate target RMS from crossfaded region for consistent volume
+            float targetRMS = crossfader.calculateRMS(crossfaded);
+            Log.d(TAG, String.format("Target RMS for entire mix: %.4f", targetRMS));
+
+            // Phase 1: Reopen track 1 and write pre-transition (with RMS normalization)
+            Log.d(TAG, "Phase 1: Writing pre-transition from track 1 (normalized)...");
+            reader1.close();
+            reader1 = new AudioChunkReader(track1Path);
+            long samplesWritten = 0;
+            while (samplesWritten < transitionPoint) {
+                float[] chunk = reader1.readNextChunk();
+                if (chunk == null) break;
+
+                long remaining = transitionPoint - samplesWritten;
+                if (chunk.length <= remaining) {
+                    crossfader.normalizeToRMS(chunk, targetRMS);
+                    crossfader.applyPeakLimiter(chunk, 0.95f);
+                    writer.writeChunk(chunk);
+                    samplesWritten += chunk.length;
+                } else {
+                    // Partial write
+                    float[] partial = new float[(int)remaining];
+                    System.arraycopy(chunk, 0, partial, 0, (int)remaining);
+                    crossfader.normalizeToRMS(partial, targetRMS);
+                    crossfader.applyPeakLimiter(partial, 0.95f);
+                    writer.writeChunk(partial);
+                    samplesWritten += remaining;
+                }
+            }
+
+            // Write crossfaded region
+            crossfader.applyPeakLimiter(crossfaded, 0.95f);
             writer.writeChunk(crossfaded);
 
-            // Phase 3: Write rest of track 2
-            Log.d(TAG, "Phase 3: Writing rest of track 2...");
+            // Phase 3: Write rest of track 2 (with RMS normalization)
+            Log.d(TAG, "Phase 3: Writing rest of track 2 (normalized)...");
             float[] chunk;
             while ((chunk = reader2.readNextChunk()) != null) {
+                crossfader.normalizeToRMS(chunk, targetRMS);
+                crossfader.applyPeakLimiter(chunk, 0.95f);
                 writer.writeChunk(chunk);
             }
 
