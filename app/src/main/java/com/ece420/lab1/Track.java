@@ -9,6 +9,7 @@ public class Track {
     private long cueInSample = 0;        // Sample position for mix-in point (0 = not set)
     private long cueOutSample = 0;       // Sample position for mix-out point (0 = not set)
     private long totalSamples = 0;       // Total samples in track (for normalization)
+    private float phase = 0.0f;          // Beat phase offset in seconds (where first beat starts)
     private boolean isPreprocessed = false;  // Whether time stretching has been completed
 
     public Track(String name, String filePath, float bpm) {
@@ -53,67 +54,74 @@ public class Track {
         this.totalSamples = samples;
     }
 
+    public float getPhase() {
+        return phase;
+    }
+
+    public void setPhase(float phase) {
+        this.phase = phase;
+    }
+
     public boolean hasCuePoints() {
         return cueOutSample > 0;
     }
 
-    /**
-     * Get cue-out position as normalized value (0.0 to 1.0).
-     * Returns -1 if cue points not set or totalSamples unknown.
-     */
+    // Get cue-out position normalized (0.0 to 1.0), returns -1 if not set
     public float getCueOutNormalized() {
         if (cueOutSample <= 0 || totalSamples <= 0) return -1;
         return (float) cueOutSample / totalSamples;
     }
 
-    /**
-     * Get cue-in position as normalized value (0.0 to 1.0).
-     * Returns -1 if totalSamples unknown.
-     */
+    // Get cue-in position normalized (0.0 to 1.0), returns -1 if not set
     public float getCueInNormalized() {
         if (totalSamples <= 0) return -1;
         return (float) cueInSample / totalSamples;
     }
 
-    /**
-     * Get the stretched file path for mixing (175 BPM version).
-     * Returns null if preprocessing hasn't been done yet.
-     */
+    // Get the 175 BPM stretched file path, null if not preprocessed
     public String getStretchedFilePath() {
         return stretchedFilePath;
     }
 
-    /**
-     * Set the stretched file path after preprocessing completes.
-     */
     public void setStretchedFilePath(String path) {
         this.stretchedFilePath = path;
         this.isPreprocessed = (path != null);
     }
 
-    /**
-     * Check if the track has been preprocessed (time-stretched to 175 BPM).
-     */
     public boolean isPreprocessed() {
         return isPreprocessed;
     }
 
-    /**
-     * Get the target BPM (always 175 for DNB).
-     */
     public float getTargetBpm() {
         return targetBpm;
     }
 
-    /**
-     * Get display string for track list showing original and target BPM.
-     * Format: "Track Name.mp3 - 168 BPM → 175 BPM"
-     */
+    // Get display string for track list
     public String getDisplayString() {
         if (isPreprocessed) {
-            return String.format("%s - %.0f BPM → %.0f BPM", name, bpm, targetBpm);
+            return String.format("%s - %.0f BPM (DJ Ready)", name, targetBpm);
         } else {
-            return String.format("%s - %.0f BPM (processing...)", name, bpm);
+            return String.format("%s - %.0f BPM (Original)", name, bpm);
         }
+    }
+
+    // Create original (unprocessed) track for Simple Fade/Overlap mixes
+    public static Track createOriginalVersion(String name, String filePath, float bpm) {
+        Track track = new Track(name, filePath, bpm);
+        track.isPreprocessed = false;
+        return track;
+    }
+
+    // Create DJ-ready (175 BPM) track for DJ Transition mixes
+    public static Track createDJReadyVersion(String name, String stretchedPath, float originalBpm,
+                                              long cueIn, long cueOut, long totalSamples, float phase) {
+        Track track = new Track(name, stretchedPath, originalBpm);
+        track.stretchedFilePath = stretchedPath;
+        track.isPreprocessed = true;
+        track.cueInSample = cueIn;
+        track.cueOutSample = cueOut;
+        track.totalSamples = totalSamples;
+        track.phase = phase;
+        return track;
     }
 }

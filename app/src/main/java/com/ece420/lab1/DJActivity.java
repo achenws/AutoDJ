@@ -19,6 +19,7 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.Manifest;
+import android.app.ProgressDialog;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
@@ -295,42 +296,153 @@ public class DJActivity extends Activity {
                 if (tempFile != null) {
                     Log.d(TAG, "Temp file created: " + tempFile.getAbsolutePath());
 
-                    // Detect BPM
+                    // Step 1: Detect BPM
                     Log.d(TAG, "Starting BPM detection...");
                     float bpm = bpmDetector.detectBPM(tempFile.getAbsolutePath());
                     Log.d(TAG, "BPM detection complete: " + bpm);
 
-                    // Create track object
+                    // Create track object with original BPM
                     Track track = new Track(fileName, tempFile.getAbsolutePath(), bpm);
 
-                    // Note: Cue point detection skipped for performance
-                    // The mixer will use default 80% cue-out point
-
-                    // Update UI on main thread
+                    // Step 2: Show progress dialog and preprocess (time stretch to 175 BPM)
                     mainHandler.post(() -> {
-                        // Add to list
-                        trackList.add(track);
-                        trackAdapter.add(String.format("%s - %.1f BPM", track.getName(), track.getBpm()));
-                        trackAdapter.notifyDataSetChanged();
+                        ProgressDialog progressDialog = new ProgressDialog(DJActivity.this);
+                        progressDialog.setTitle("Preprocessing Track");
+                        progressDialog.setMessage(String.format("Stretching %.0f BPM → 175 BPM...", bpm));
+                        progressDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+                        progressDialog.setProgress(0);
+                        progressDialog.setMax(100);
+                        progressDialog.setCancelable(false);
+                        progressDialog.show();
 
-                        // Set as current track
-                        currentTrack = track;
-                        tvCurrentTrack.setText(track.getName());
-                        tvBPMValue.setText(String.format("%.1f", track.getBpm()));
+                        // Continue preprocessing in background
+                        executorService.execute(() -> {
+                            try {
+                                // Preprocess with progress callback
+                                TrackPreprocessor.PreprocessResult result = TrackPreprocessor.preprocessTrack(
+                                        DJActivity.this,
+                                        tempFile.getAbsolutePath(),
+                                        bpm,
+                                        new TrackPreprocessor.ProgressCallback() {
+                                            @Override
+                                            public void onProgress(float progress) {
+                                                mainHandler.post(() -> {
+                                                    progressDialog.setProgress((int) (progress * 100));
+                                                });
+                                            }
 
-                        // Enable playback buttons
-                        btnPlay.setEnabled(true);
-                        btnStop.setEnabled(true);
+                                            @Override
+                                            public void onStatusUpdate(String status) {
+                                                mainHandler.post(() -> {
+                                                    progressDialog.setMessage(status);
+                                                });
+                                            }
+                                        }
+                                );
 
-                        // Load into player and extract waveform
-                        try {
-                            audioPlayerManager.loadTrack(track.getFilePath());
-                            // Extract waveform in background
-                            displayWaveform(tempFile);
-                        } catch (IOException e) {
-                            Log.e(TAG, "Error loading track", e);
-                            Toast.makeText(DJActivity.this, "Error loading track", Toast.LENGTH_SHORT).show();
-                        }
+                                if (result.success) {
+                                    // Update track with preprocessed file path and phase
+                                    track.setStretchedFilePath(result.stretchedFilePath);
+                                    track.setPhase(result.phase);
+                                    Log.d(TAG, "Preprocessing complete, phase=" + result.phase);
+
+                                    // Step 3: Detect cue points on the STRETCHED audio
+                                    Log.d(TAG, "Detecting cue points on stretched audio...");
+                                    try {
+                                        // Extract waveform from stretched file for cue point detection
+                                        float[] stretchedWaveform = WaveformExtractor.extractWaveform(
+                                                result.stretchedFilePath, 1500);
+
+                                        if (stretchedWaveform != null) {
+                                            // Calculate duration of stretched file
+                                            AudioChunkReader reader = new AudioChunkReader(result.stretchedFilePath);
+                                            long totalSamples = reader.getTotalSamples();
+                                            long durationMs = (long) (reader.getDurationSeconds() * 1000);
+                                            reader.close();
+
+                                            // Find cue points using 175 BPM (the stretched tempo)
+                                            SimpleBPMDetector.CuePoints cues = bpmDetector.findCuePointsFromWaveform(
+                                                    stretchedWaveform, 175.0f, durationMs);
+
+                                            track.setCueInSample(cues.cueInSample);
+                                            track.setCueOutSample(cues.cueOutSample);
+                                            track.setTotalSamples(totalSamples);
+
+                                            Log.d(TAG, String.format("Cue points detected on stretched audio - In: %d, Out: %d, Total: %d",
+                                                    cues.cueInSample, cues.cueOutSample, totalSamples));
+                                        }
+                                    } catch (Exception e) {
+                                        Log.w(TAG, "Cue point detection failed", e);
+                                    }
+
+                                    // Create both track versions
+                                    final Track originalTrack = Track.createOriginalVersion(
+                                            fileName, tempFile.getAbsolutePath(), bpm);
+
+                                    final Track djReadyTrack = Track.createDJReadyVersion(
+                                            fileName, result.stretchedFilePath, bpm,
+                                            track.getCueInSample(), track.getCueOutSample(), track.getTotalSamples(),
+                                            result.phase);
+
+                                    // Update UI on main thread
+                                    mainHandler.post(() -> {
+                                        progressDialog.dismiss();
+
+                                        // Add BOTH versions to list
+                                        // 1. Original version (for Simple Fade and Overlap)
+                                        trackList.add(originalTrack);
+                                        trackAdapter.add(originalTrack.getDisplayString());
+
+                                        // 2. DJ Ready version (for DJ Transition)
+                                        trackList.add(djReadyTrack);
+                                        trackAdapter.add(djReadyTrack.getDisplayString());
+
+                                        trackAdapter.notifyDataSetChanged();
+
+                                        // Set original as current track for playback
+                                        currentTrack = originalTrack;
+                                        tvCurrentTrack.setText(originalTrack.getName());
+                                        tvBPMValue.setText(String.format("%.0f BPM", originalTrack.getBpm()));
+
+                                        // Enable playback buttons
+                                        btnPlay.setEnabled(true);
+                                        btnStop.setEnabled(true);
+
+                                        // Load ORIGINAL file for playback (user hears original tempo)
+                                        try {
+                                            audioPlayerManager.loadTrack(originalTrack.getFilePath());
+                                            // Extract waveform from original for display
+                                            displayWaveform(tempFile);
+                                        } catch (IOException e) {
+                                            Log.e(TAG, "Error loading track", e);
+                                            Toast.makeText(DJActivity.this, "Error loading track", Toast.LENGTH_SHORT).show();
+                                        }
+
+                                        Toast.makeText(DJActivity.this,
+                                                String.format("Added: Original (%.0f BPM) + DJ Ready (175 BPM)", bpm),
+                                                Toast.LENGTH_SHORT).show();
+                                    });
+                                } else {
+                                    // Preprocessing failed
+                                    mainHandler.post(() -> {
+                                        progressDialog.dismiss();
+                                        Toast.makeText(DJActivity.this,
+                                                "Preprocessing failed: " + result.errorMessage,
+                                                Toast.LENGTH_LONG).show();
+                                        tvBPMValue.setText("Error");
+                                    });
+                                }
+                            } catch (Exception e) {
+                                Log.e(TAG, "Error during preprocessing", e);
+                                mainHandler.post(() -> {
+                                    progressDialog.dismiss();
+                                    Toast.makeText(DJActivity.this,
+                                            "Error: " + e.getMessage(),
+                                            Toast.LENGTH_LONG).show();
+                                    tvBPMValue.setText("Error");
+                                });
+                            }
+                        });
                     });
                 }
             } catch (Exception e) {
@@ -435,6 +547,23 @@ public class DJActivity extends Activity {
         // Get transition type
         int transitionType = spinnerTransitionType.getSelectedItemPosition();
         String transitionName = (String) spinnerTransitionType.getSelectedItem();
+
+        // Validate track types based on transition type
+        if (transitionType == 0) {
+            // DJ Transition requires DJ Ready tracks (preprocessed at 175 BPM)
+            if (!track1ForMix.isPreprocessed() || !track2ForMix.isPreprocessed()) {
+                Toast.makeText(this, "DJ Transition requires 'DJ Ready' tracks (175 BPM versions)",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+        } else {
+            // Simple Crossfade and Overlap require Original tracks (unprocessed)
+            if (track1ForMix.isPreprocessed() || track2ForMix.isPreprocessed()) {
+                Toast.makeText(this, transitionName + " requires 'Original' tracks (not DJ Ready versions)",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+        }
 
         // Show status
         tvMixStatus.setVisibility(View.VISIBLE);

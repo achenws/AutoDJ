@@ -18,12 +18,12 @@ import java.util.List;
 public class SimpleBPMDetector {
     private static final String TAG = "SimpleBPMDetector";
 
-    // Constants matching the Python implementation
+    // BPM detection constants
     private static final int HOP_LENGTH = 512;
-    private static final int MIN_BPM = 130;  // Widened to catch half-time DNB (130-140 BPM)
+    private static final int MIN_BPM = 160;  // D&B range
     private static final int MAX_BPM = 190;
-    private static final int WINDOW_SIZE = 16;  // For moving average
-    private static final int MAX_HARMONICS = 8;  // Check up to 8 harmonics
+    private static final int WINDOW_SIZE = 16;
+    private static final int MAX_HARMONICS = 8;
 
     // Helper class for lag-score pairs
     private static class LagScore implements Comparable<LagScore> {
@@ -41,10 +41,7 @@ public class SimpleBPMDetector {
         }
     }
 
-    /**
-     * Container for cue point detection results.
-     * Cue points are sample positions optimal for DJ transitions.
-     */
+    // Cue points for DJ transitions
     public static class CuePoints {
         public final long cueInSample;   // Where to start mixing in (for incoming track)
         public final long cueOutSample;  // Where to start fading out (for outgoing track)
@@ -55,9 +52,7 @@ public class SimpleBPMDetector {
         }
     }
 
-    /**
-     * Container for beat detection results including full beat grid and downbeats.
-     */
+    // Beat grid with beats, downbeats, BPM, and phase
     public static class BeatGrid {
         public final float[] beats;        // All beat timestamps in seconds
         public final float[] downbeats;    // Downbeat timestamps (every 4th beat)
@@ -80,7 +75,7 @@ public class SimpleBPMDetector {
         Log.d(TAG, "Detecting BPM for: " + filePath);
 
         try {
-            // Step 1: Decode audio file to PCM (only 5 seconds for fast BPM detection)
+            // Decode audio (only 5 seconds needed for BPM)
             float[] audioSamples = decodeAudioFile(filePath);
             if (audioSamples == null || audioSamples.length == 0) {
                 Log.e(TAG, "Failed to decode audio");
@@ -95,14 +90,7 @@ public class SimpleBPMDetector {
         }
     }
 
-    /**
-     * Detect BPM from already-decoded audio samples.
-     * Use this to avoid duplicate decoding when samples are already available.
-     *
-     * @param audioSamples Decoded audio samples (float array)
-     * @param sampleRate   Sample rate in Hz
-     * @return Detected BPM, or 175.0f on error
-     */
+    // Detect BPM from already-decoded samples
     public float detectBPMFromSamples(float[] audioSamples, int sampleRate) {
         Log.d(TAG, "Detecting BPM from " + audioSamples.length + " samples");
 
@@ -112,25 +100,18 @@ public class SimpleBPMDetector {
                 return 175.0f;  // Default
             }
 
-            // BPM detection only needs first ~5 seconds of audio
-            // Limit to 5 seconds worth of samples for efficiency
-            int maxSamples = sampleRate * 5 * 2;  // 5 seconds, stereo
+            // Limit to 5 seconds for efficiency
+            int maxSamples = sampleRate * 5 * 2;
             float[] samples = audioSamples;
             if (audioSamples.length > maxSamples) {
                 samples = new float[maxSamples];
                 System.arraycopy(audioSamples, 0, samples, 0, maxSamples);
             }
 
-            // Step 2: Compute onset strength
+            // Compute onset strength and process
             float[] onsetStrength = computeOnsetStrength(samples, sampleRate);
-
-            // Step 3: Apply half-wave rectification
             float[] onsetHWR = halfWaveRectify(onsetStrength);
-
-            // Step 4: Compute autocorrelation
             float[] autocorr = computeAutocorrelation(onsetHWR);
-
-            // Step 5: Find best tempo using multi-harmonic scoring
             float bpm = findBestTempo(autocorr, sampleRate);
 
             Log.d(TAG, "Detected BPM: " + bpm);
@@ -142,32 +123,23 @@ public class SimpleBPMDetector {
         }
     }
 
-    /**
-     * Detect full beat grid with phase alignment and downbeat detection.
-     * This generates a complete beat array matching the Python implementation.
-     *
-     * @param audioSamples Decoded audio samples
-     * @param sampleRate   Sample rate in Hz
-     * @return BeatGrid with beats, downbeats, BPM, and phase
-     */
+    // Detect full beat grid with phase alignment
     public BeatGrid detectBeatGrid(float[] audioSamples, int sampleRate) {
         Log.d(TAG, "Detecting beat grid from " + audioSamples.length + " samples");
 
         try {
-            // Step 1: Detect BPM using standard algorithm
+            // Detect BPM
             float bpm = detectBPMFromSamples(audioSamples, sampleRate);
 
-            // Step 2: Compute onset strength for phase detection
+            // Compute onset strength and find phase
             float[] onsetStrength = computeOnsetStrength(audioSamples, sampleRate);
             float[] onsetHWR = halfWaveRectify(onsetStrength);
-
-            // Step 3: Find phase offset (matching Python implementation)
-            float period = 60.0f / bpm;  // Seconds per beat
+            float period = 60.0f / bpm;
             float phase = findPhaseOffset(onsetHWR, period, sampleRate);
 
-            Log.d(TAG, "Phase offset: " + phase + "s (period: " + period + "s)");
+            Log.d(TAG, "Phase offset: " + phase + "s");
 
-            // Step 4: Generate beat array
+            // Generate beat array
             List<Float> beatList = new ArrayList<>();
             float audioDuration = audioSamples.length / (float) sampleRate;
             float beatTime = phase;
@@ -182,7 +154,7 @@ public class SimpleBPMDetector {
                 beats[i] = beatList.get(i);
             }
 
-            // Step 5: Detect downbeats (every 4th beat)
+            // Detect downbeats (every 4th beat)
             float[] downbeats = detectDownbeats(beats);
 
             Log.d(TAG, String.format("Beat grid: %d beats, %d downbeats, BPM=%.1f",
@@ -199,13 +171,9 @@ public class SimpleBPMDetector {
         }
     }
 
-    /**
-     * Find phase offset by testing different phases and selecting the one
-     * with maximum alignment to onset strength peaks.
-     * Matches the Python implementation (lines 106-125).
-     */
+    // Find phase offset by testing different phases
     private float findPhaseOffset(float[] onsetHWR, float period, int sampleRate) {
-        int numPhases = 32;  // Test 32 different phases (matching Python)
+        int numPhases = 32;
         float bestPhase = 0.0f;
         float bestScore = 0.0f;
 
@@ -233,11 +201,7 @@ public class SimpleBPMDetector {
         return bestPhase;
     }
 
-    /**
-     * Detect downbeats from beat array.
-     * Downbeats occur every 4 beats (bars in 4/4 time).
-     * Matches Python implementation (lines 135-139).
-     */
+    // Detect downbeats (every 4 beats for 4/4 time)
     private float[] detectDownbeats(float[] beats) {
         if (beats.length < 4) {
             return beats;  // Not enough beats
@@ -254,15 +218,7 @@ public class SimpleBPMDetector {
         return downbeats;
     }
 
-    /**
-     * Fast cue point detection using pre-extracted waveform data.
-     * This avoids re-decoding the audio file.
-     *
-     * @param waveformData Pre-extracted waveform (amplitude values)
-     * @param bpm          Detected BPM of the track
-     * @param durationMs   Total track duration in milliseconds
-     * @return CuePoints with normalized positions (0.0 to 1.0)
-     */
+    // Find cue points from pre-extracted waveform data
     public CuePoints findCuePointsFromWaveform(float[] waveformData, float bpm, long durationMs) {
         Log.d(TAG, "Finding cue points from waveform, BPM=" + bpm + ", points=" + waveformData.length);
 
@@ -311,7 +267,7 @@ public class SimpleBPMDetector {
             float cueInNorm = defaultCueIn;
             for (int bar = startSearchBar; bar < Math.min(startSearchBar + 16, numBars / 2); bar++) {
                 if (barEnergies[bar] < 0.7f * meanEnergy) {
-                    // Also check next bar to avoid transient dips (matching Python)
+                    // Also check next bar to avoid transient dips
                     if (bar + 1 < numBars && barEnergies[bar + 1] < 0.8f * meanEnergy) {
                         cueInNorm = (float) bar / numBars;
                         Log.d(TAG, "Found cue-in at bar " + bar);
@@ -321,7 +277,7 @@ public class SimpleBPMDetector {
             }
 
             // Find cue-out: high energy bar in second half
-            int endSearchBar = numBars - 16;  // Stop 16 bars before end (matching Python)
+            int endSearchBar = numBars - 16;  // Stop 16 bars before end
             int startMidSearch = Math.max(numBars / 2, (int)(cueInNorm * numBars) + 8);
 
             float cueOutNorm = defaultCueOut;
@@ -333,7 +289,7 @@ public class SimpleBPMDetector {
                 }
             }
 
-            // Ensure minimum 8 bars between cue-in and cue-out (matching Python)
+            // Ensure minimum 8 bars between cue-in and cue-out
             int cueInBar = (int)(cueInNorm * numBars);
             int cueOutBar = (int)(cueOutNorm * numBars);
             if (cueOutBar - cueInBar < 8) {
@@ -356,26 +312,7 @@ public class SimpleBPMDetector {
         }
     }
 
-    /**
-     * Find optimal cue points for DJ transitions with DNB-specific intelligence.
-     *
-     * DNB Mixing Strategy:
-     * - Cue-In: Start of breakdown/intro section (low energy, clear drums)
-     * - Cue-Out: High-energy main section (60-75% through track)
-     * - Mix from high energy (A) to low energy intro (B) then both build together
-     *
-     * Algorithm (enhanced from Python AutoDJ):
-     * 1. Compute RMS energy per bar using onset strength frames
-     * 2. Cue-In: Find low-energy bar (< 0.7× mean) ~30-45s in (breakdown/intro)
-     * 3. Cue-Out: Find high-energy bar (> mean) in 60-75% range (main section)
-     * 4. Validate downbeat alignment for smooth transitions
-     * 5. Both snap to bar boundaries (4-beat bars)
-     *
-     * @param audioSamples Full decoded audio samples
-     * @param sampleRate   Sample rate in Hz
-     * @param bpm          Detected BPM of the track
-     * @return CuePoints with sample positions, or defaults if detection fails
-     */
+    // Find optimal cue points for DJ transitions based on energy analysis
     public CuePoints findCuePoints(float[] audioSamples, int sampleRate, float bpm) {
         Log.d(TAG, "Finding cue points for BPM=" + bpm + ", samples=" + audioSamples.length);
 
@@ -389,19 +326,16 @@ public class SimpleBPMDetector {
                 return new CuePoints(defaultCueIn, defaultCueOut);
             }
 
-            // Step 1: Compute onset strength (RMS energy per frame)
+            // Compute onset strength
             float[] onsetStrength = computeOnsetStrength(audioSamples, sampleRate);
             if (onsetStrength.length < 10) {
                 Log.w(TAG, "Track too short for cue point detection");
                 return new CuePoints(defaultCueIn, defaultCueOut);
             }
 
-            // Step 2: Calculate bar dimensions
-            // Bar duration in seconds (4 beats per bar in 4/4 time)
+            // Calculate bar dimensions
             float barDurationSec = 4 * 60.0f / bpm;
-            // Samples per bar
             int barDurationSamples = (int) (barDurationSec * sampleRate);
-            // Frames per bar (onset strength uses HOP_LENGTH hop size)
             int framesPerBar = barDurationSamples / HOP_LENGTH;
             if (framesPerBar < 1) framesPerBar = 1;
 
@@ -414,7 +348,7 @@ public class SimpleBPMDetector {
 
             Log.d(TAG, "Bar analysis: " + numBars + " bars, " + framesPerBar + " frames/bar");
 
-            // Step 3: Compute per-bar energy
+            // Compute per-bar energy
             float[] barEnergies = new float[numBars];
             float totalEnergy = 0;
             for (int bar = 0; bar < numBars; bar++) {
@@ -430,8 +364,7 @@ public class SimpleBPMDetector {
             float meanEnergy = totalEnergy / numBars;
             Log.d(TAG, "Mean bar energy: " + meanEnergy);
 
-            // Step 4: Find cue-in point (low energy bar, ~30-45s into track)
-            // DNB tracks typically have intro breakdowns around 30-45 seconds
+            // Find cue-in point (low energy bar, ~30-45s into track)
             int startSearchBar = Math.max(1, (int) (30.0f / barDurationSec));
             int endCueInSearch = Math.min((int) (45.0f / barDurationSec), numBars / 3);
 
@@ -439,9 +372,9 @@ public class SimpleBPMDetector {
             boolean foundCueIn = false;
 
             for (int bar = startSearchBar; bar < endCueInSearch; bar++) {
-                // Look for low energy bar (< 0.7 × mean) - indicates breakdown/intro section
+                // Look for low energy bar
                 if (barEnergies[bar] < 0.7f * meanEnergy) {
-                    // Also check next bar to avoid transient dips (matching Python)
+                    // Also check next bar to avoid transient dips
                     if (bar + 1 < numBars && barEnergies[bar + 1] < 0.8f * meanEnergy) {
                         cueInSample = (long) (bar * barDurationSec * sampleRate);
                         Log.d(TAG, String.format("Found cue-in at bar %d (~%.1fs, energy=%.3f, %.0f%% of mean)",
@@ -456,8 +389,7 @@ public class SimpleBPMDetector {
                 Log.d(TAG, "No ideal cue-in found, using default (start of track)");
             }
 
-            // Step 5: Find cue-out point (high energy bar in 60-75% range)
-            // DNB cue-out should be in main section, typically 60-75% through track
+            // Find cue-out point (high energy bar in 60-75% range)
             int cueOutStart = (int) (numBars * 0.60f);  // Start at 60%
             int cueOutEnd = Math.min((int) (numBars * 0.75f), numBars - 16);  // End at 75% or 16 bars before end
             int cueInBar = (int) (cueInSample / (barDurationSec * sampleRate));
@@ -467,7 +399,7 @@ public class SimpleBPMDetector {
             boolean foundCueOut = false;
 
             for (int bar = cueOutStart; bar < cueOutEnd; bar++) {
-                // Look for high energy bar (> mean) - indicates main section drop
+                // Look for high energy bar
                 if (barEnergies[bar] > meanEnergy) {
                     cueOutSample = (long) (bar * barDurationSec * sampleRate);
                     Log.d(TAG, String.format("Found cue-out at bar %d (~%.1fs, energy=%.3f, %.0f%% through track)",
@@ -667,12 +599,7 @@ public class SimpleBPMDetector {
         return averaged;
     }
 
-    /**
-     * Compute autocorrelation using FFT (Wiener-Khinchin theorem).
-     * This is O(n log n) instead of O(n²) for the direct method.
-     *
-     * Autocorrelation(x) = IFFT(|FFT(x)|²)
-     */
+    // Compute autocorrelation using FFT
     private float[] computeAutocorrelation(float[] signal) {
         // Pad to next power of 2 for efficient FFT
         int n = signal.length;
@@ -717,8 +644,8 @@ public class SimpleBPMDetector {
 
     private float findBestTempo(float[] autocorr, int sampleRate) {
         // Calculate lag range for 160-190 BPM
-        int minLag = (int) ((60.0f / MAX_BPM) * sampleRate / HOP_LENGTH);  // ~29
-        int maxLag = (int) ((60.0f / MIN_BPM) * sampleRate / HOP_LENGTH);  // ~34
+        int minLag = (int) ((60.0f / MAX_BPM) * sampleRate / HOP_LENGTH);
+        int maxLag = (int) ((60.0f / MIN_BPM) * sampleRate / HOP_LENGTH);
 
         // Make sure lags are within bounds
         minLag = Math.max(1, minLag);
@@ -731,7 +658,7 @@ public class SimpleBPMDetector {
             float score = 0;
             int count = 0;
 
-            // Check harmonics (matching Python implementation)
+            // Check harmonics
             for (int i = 1; i <= MAX_HARMONICS; i++) {
                 int harmonicLag = i * lag;
                 if (harmonicLag < autocorr.length) {
@@ -747,82 +674,93 @@ public class SimpleBPMDetector {
             candidates.add(new LagScore(lag, score));
         }
 
-        // Sort candidates by score
+        // Sort candidates by score (descending)
         Collections.sort(candidates);
 
         if (candidates.isEmpty()) {
             return 175.0f;  // Default
         }
 
-        // Get best lag
+        // Get best lag and original tempo
         int bestLag = candidates.get(0).lag;
-
-        // Convert lag to BPM
+        int originalLag = bestLag;
         float tempo = 60.0f / (bestLag * HOP_LENGTH / (float) sampleRate);
+        float originalTempo = tempo;
 
-        // Check for half-time detection (matching Python logic)
-        if (tempo < 100 && candidates.size() > 1) {
-            // Try doubling the tempo
+        // Half-time detection: if tempo < 100, try doubling it
+        if (tempo < 100) {
             float doubleTempo = tempo * 2;
-            if (doubleTempo >= MIN_BPM && doubleTempo <= MAX_BPM) {
-                int halfLag = bestLag / 2;
+            int halfLag = bestLag / 2;
 
-                // Check if half-lag has good score
-                for (LagScore candidate : candidates) {
-                    if (Math.abs(candidate.lag - halfLag) <= 1) {
-                        // Compare scores
-                        if (candidate.score > candidates.get(0).score * 0.4f) {
-                            tempo = doubleTempo;
-                            break;
-                        }
+            if (doubleTempo >= MIN_BPM && doubleTempo <= MAX_BPM && halfLag >= minLag) {
+                // Calculate score at half lag
+                float scoreHalf = 0;
+                int countHalf = 0;
+                for (int i = 1; i <= MAX_HARMONICS; i++) {
+                    int harmonicLag = i * halfLag;
+                    if (harmonicLag < autocorr.length) {
+                        scoreHalf += autocorr[harmonicLag];
+                        countHalf++;
                     }
+                }
+                if (countHalf > 0) scoreHalf /= countHalf;
+
+                // Calculate score at original lag
+                float scoreOriginal = 0;
+                int countOriginal = 0;
+                for (int i = 1; i <= MAX_HARMONICS; i++) {
+                    int harmonicLag = i * originalLag;
+                    if (harmonicLag < autocorr.length) {
+                        scoreOriginal += autocorr[harmonicLag];
+                        countOriginal++;
+                    }
+                }
+                if (countOriginal > 0) scoreOriginal /= countOriginal;
+
+                // Use doubled tempo if half-lag score is reasonable
+                if (scoreHalf > scoreOriginal * 0.4f) {
+                    Log.d(TAG, String.format("Half-time correction: %.1f BPM -> %.1f BPM", tempo, doubleTempo));
+                    tempo = doubleTempo;
+                    bestLag = halfLag;
                 }
             }
         }
-
-        // Check for double-time detection (enhanced for √2 harmonic)
-        // Common issue: 190 BPM detected instead of 134 (190 ≈ 134 × √2)
-        if (tempo > 185 && candidates.size() > 1) {
-            // Try halving the tempo
+        // Double-time detection: if tempo > 185, try halving it
+        else if (tempo > 185) {
             float halfTempo = tempo / 2;
-            if (halfTempo >= 80 && halfTempo <= 95) {
-                int doubleLag = bestLag * 2;
+            int doubleLag = bestLag * 2;
 
-                // Check if double-lag has good score
-                for (LagScore candidate : candidates) {
-                    if (Math.abs(candidate.lag - doubleLag) <= 1) {
-                        // Compare scores
-                        if (candidate.score > candidates.get(0).score * 0.8f) {
-                            tempo = halfTempo * 2;  // Keep in 160-190 range
-                            break;
-                        }
+            // Check if half_tempo is in 90-95 range
+            if (halfTempo >= 90 && halfTempo <= 95 && doubleLag <= maxLag) {
+                // Calculate score at double lag
+                float scoreDouble = 0;
+                int countDouble = 0;
+                for (int i = 1; i <= Math.min(4, MAX_HARMONICS); i++) {
+                    int harmonicLag = i * doubleLag;
+                    if (harmonicLag < autocorr.length) {
+                        scoreDouble += autocorr[harmonicLag];
+                        countDouble++;
                     }
                 }
-            }
-        }
+                if (countDouble > 0) scoreDouble /= countDouble;
 
-        // Check for √2 harmonic error (e.g., 190 detected instead of 134)
-        // This happens when the detector locks onto a subdivision beat
-        if (tempo >= 185 && tempo <= 192 && candidates.size() > 1) {
-            float sqrt2Corrected = tempo / 1.414f;  // Divide by √2
-
-            // Check if corrected tempo is in half-time DNB range (130-140 BPM)
-            if (sqrt2Corrected >= 130 && sqrt2Corrected <= 140) {
-                // Calculate the lag that would correspond to this tempo
-                int correctedLag = (int) (60.0f / sqrt2Corrected * sampleRate / HOP_LENGTH);
-
-                // Check if this lag has a reasonable score in candidates
-                for (LagScore candidate : candidates) {
-                    if (Math.abs(candidate.lag - correctedLag) <= 2) {
-                        // If the corrected tempo has decent support, use it
-                        if (candidate.score > candidates.get(0).score * 0.5f) {
-                            Log.d(TAG, String.format(
-                                "√2 harmonic correction: %.1f BPM -> %.1f BPM",
-                                tempo, sqrt2Corrected));
-                            tempo = sqrt2Corrected;
-                            break;
-                        }
+                // Calculate score at original lag
+                float scoreOriginal = 0;
+                int countOriginal = 0;
+                for (int i = 1; i <= Math.min(4, MAX_HARMONICS); i++) {
+                    int harmonicLag = i * originalLag;
+                    if (harmonicLag < autocorr.length) {
+                        scoreOriginal += autocorr[harmonicLag];
+                        countOriginal++;
                     }
+                }
+                if (countOriginal > 0) scoreOriginal /= countOriginal;
+
+                // Use halved tempo if double-lag score is reasonable
+                if (scoreDouble > scoreOriginal * 0.8f) {
+                    Log.d(TAG, String.format("Double-time correction: %.1f BPM -> %.1f BPM (half-time feel)", tempo, halfTempo));
+                    tempo = halfTempo;
+                    bestLag = doubleLag;
                 }
             }
         }
