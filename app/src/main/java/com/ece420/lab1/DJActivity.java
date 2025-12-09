@@ -596,7 +596,12 @@ public class DJActivity extends Activity {
 
                         // Create a Track for the mixed result
                         float avgBpm = (track1ForMix.getBpm() + track2ForMix.getBpm()) / 2;
-                        Track mixedTrack = new Track("Mixed Output", outputPath, avgBpm);
+                        // Extract filename from output path for display
+                        String mixedName = new File(outputPath).getName();
+                        if (mixedName.endsWith(".wav")) {
+                            mixedName = mixedName.substring(0, mixedName.length() - 4);
+                        }
+                        Track mixedTrack = new Track(mixedName, outputPath, avgBpm);
 
                         // Add to track list
                         trackList.add(mixedTrack);
