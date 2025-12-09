@@ -10,7 +10,7 @@ public class SOLATimeStretcher {
     // SOLA parameters
     private static final int FRAME_LENGTH = 2048;
     private static final float OVERLAP_RATIO = 0.5f;
-    private static final float SEARCH_RATIO = 0.05f;  // Reduced from 0.1 to minimize phase drift
+    private static final float SEARCH_RATIO = 0.05f; // Reduced from 0.1 to minimize phase drift
 
     private final int frameLength;
     private final int hopOutput;
@@ -19,9 +19,9 @@ public class SOLATimeStretcher {
 
     public SOLATimeStretcher() {
         this.frameLength = FRAME_LENGTH;
-        this.hopOutput = (int) (frameLength * OVERLAP_RATIO);  // 1024
+        this.hopOutput = (int) (frameLength * OVERLAP_RATIO); // 1024
         this.searchRange = (int) (frameLength * SEARCH_RATIO); // 204
-        this.overlapLen = frameLength - hopOutput;              // 1024
+        this.overlapLen = frameLength - hopOutput; // 1024
     }
 
     public SOLATimeStretcher(int frameLength, float overlapRatio) {
@@ -39,10 +39,11 @@ public class SOLATimeStretcher {
         }
 
         // Calculate input hop (how much we advance in input per frame)
-        int hopInput = (int) (hopOutput / stretchFactor);
+        // Use float for precise drift-free calculation
+        float hopInputFloat = hopOutput / stretchFactor;
 
-        Log.d(TAG, String.format("SOLA stretch: factor=%.3f, hopOutput=%d, hopInput=%d, overlapLen=%d",
-                stretchFactor, hopOutput, hopInput, overlapLen));
+        Log.d(TAG, String.format("SOLA stretch: factor=%.3f, hopOutput=%d, hopInput=%.3f, overlapLen=%d",
+                stretchFactor, hopOutput, hopInputFloat, overlapLen));
 
         // Dynamically grow output buffer as needed
         // Estimate output size
@@ -50,10 +51,12 @@ public class SOLATimeStretcher {
         float[] output = new float[estimatedLength];
         int outputLen = 0;
 
-        int inputPos = 0;
+        float inputPosFloat = 0.0f;
         int frameCount = 0;
 
-        while (inputPos + frameLength < input.length) {
+        while ((int) inputPosFloat + frameLength < input.length) {
+            int inputPos = (int) inputPosFloat;
+
             // Get current frame
             float[] frame = new float[frameLength];
             System.arraycopy(input, inputPos, frame, 0, frameLength);
@@ -119,7 +122,7 @@ public class SOLATimeStretcher {
                 outputLen += frameLength;
             }
 
-            inputPos += hopInput;
+            inputPosFloat += hopInputFloat;
             frameCount++;
         }
 

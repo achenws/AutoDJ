@@ -20,10 +20,14 @@ public class SimpleBPMDetector {
 
     // BPM detection constants
     private static final int HOP_LENGTH = 512;
-    private static final int MIN_BPM = 160;  // D&B range
+    private static final int MIN_BPM = 160; // D&B range
     private static final int MAX_BPM = 190;
     private static final int WINDOW_SIZE = 16;
     private static final int MAX_HARMONICS = 8;
+
+    // Beat grid detection constants (higher resolution)
+    private static final int BEAT_GRID_HOP_LENGTH = 128; // ~2.9ms at 44.1kHz
+    private static final int PHASE_CANDIDATES = 256; // Sub-millisecond phase precision
 
     // Helper class for lag-score pairs
     private static class LagScore implements Comparable<LagScore> {
@@ -37,14 +41,14 @@ public class SimpleBPMDetector {
 
         @Override
         public int compareTo(LagScore other) {
-            return Float.compare(other.score, this.score);  // Descending order
+            return Float.compare(other.score, this.score); // Descending order
         }
     }
 
     // Cue points for DJ transitions
     public static class CuePoints {
-        public final long cueInSample;   // Where to start mixing in (for incoming track)
-        public final long cueOutSample;  // Where to start fading out (for outgoing track)
+        public final long cueInSample; // Where to start mixing in (for incoming track)
+        public final long cueOutSample; // Where to start fading out (for outgoing track)
 
         public CuePoints(long cueIn, long cueOut) {
             this.cueInSample = cueIn;
@@ -54,10 +58,10 @@ public class SimpleBPMDetector {
 
     // Beat grid with beats, downbeats, BPM, and phase
     public static class BeatGrid {
-        public final float[] beats;        // All beat timestamps in seconds
-        public final float[] downbeats;    // Downbeat timestamps (every 4th beat)
-        public final float bpm;            // Detected BPM
-        public final float phase;          // Phase offset in seconds
+        public final float[] beats; // All beat timestamps in seconds
+        public final float[] downbeats; // Downbeat timestamps (every 4th beat)
+        public final float bpm; // Detected BPM
+        public final float phase; // Phase offset in seconds
 
         public BeatGrid(float[] beats, float[] downbeats, float bpm, float phase) {
             this.beats = beats;
@@ -71,56 +75,100 @@ public class SimpleBPMDetector {
         // Constructor
     }
 
+    // Helper class to hold audio data and its sample rate
+    private static class AudioData {
+        final float[] samples;
+        final int sampleRate;
+
+        AudioData(float[] samples, int sampleRate) {
+            this.samples = samples;
+            this.sampleRate = sampleRate;
+        }
+    }
+
     public float detectBPM(String filePath) {
         Log.d(TAG, "Detecting BPM for: " + filePath);
 
         try {
-            // Decode audio (only 5 seconds needed for BPM)
-            float[] audioSamples = decodeAudioFile(filePath);
-            if (audioSamples == null || audioSamples.length == 0) {
+            // Decode audio (only 30 seconds needed for BPM)
+            AudioData audioData = decodeAudioFile(filePath);
+            if (audioData == null || audioData.samples == null || audioData.samples.length == 0) {
                 Log.e(TAG, "Failed to decode audio");
-                return 175.0f;  // Default
+                return 175.0f; // Default
             }
 
-            return detectBPMFromSamples(audioSamples, 44100);
+            return detectBPMFromSamples(audioData.samples, audioData.sampleRate);
 
         } catch (Exception e) {
             Log.e(TAG, "Error detecting BPM", e);
-            return 175.0f;  // Default fallback
+            return 175.0f; // Default fallback
         }
     }
 
     // Detect BPM from already-decoded samples
     public float detectBPMFromSamples(float[] audioSamples, int sampleRate) {
-        Log.d(TAG, "Detecting BPM from " + audioSamples.length + " samples");
+        Log.d(TAG, "Detecting BPM from " + audioSamples.length + " samples at " + sampleRate + "Hz");
 
         try {
             if (audioSamples == null || audioSamples.length == 0) {
                 Log.e(TAG, "No audio samples provided");
-                return 175.0f;  // Default
+                return 175.0f; // Default
             }
 
-            // Limit to 5 seconds for efficiency
-            int maxSamples = sampleRate * 5 * 2;
+            // Normalization: Ensure we work with 44100Hz for consistent detection results
             float[] samples = audioSamples;
-            if (audioSamples.length > maxSamples) {
-                samples = new float[maxSamples];
-                System.arraycopy(audioSamples, 0, samples, 0, maxSamples);
+            int analysisRate = sampleRate;
+
+            if (sampleRate != 44100) {
+                Log.d(TAG, "Resampling from " + sampleRate + " to 44100Hz for BPM detection");
+                samples = resampleTo44100(audioSamples, sampleRate);
+                analysisRate = 44100;
+            }
+
+            // Limit to max 30 seconds to avoid memory issues
+            int maxSamples = analysisRate * 30 * 2;
+            if (samples.length > maxSamples) {
+                float[] truncated = new float[maxSamples];
+                System.arraycopy(samples, 0, truncated, 0, maxSamples);
+                samples = truncated;
             }
 
             // Compute onset strength and process
-            float[] onsetStrength = computeOnsetStrength(samples, sampleRate);
+            float[] onsetStrength = computeOnsetStrength(samples, analysisRate);
             float[] onsetHWR = halfWaveRectify(onsetStrength);
             float[] autocorr = computeAutocorrelation(onsetHWR);
-            float bpm = findBestTempo(autocorr, sampleRate);
+            float bpm = findBestTempo(autocorr, analysisRate);
 
             Log.d(TAG, "Detected BPM: " + bpm);
             return bpm;
 
         } catch (Exception e) {
             Log.e(TAG, "Error detecting BPM from samples", e);
-            return 175.0f;  // Default fallback
+            return 175.0f; // Default fallback
         }
+    }
+
+    // Helper to resample audio to 44100Hz
+    private float[] resampleTo44100(float[] input, int inputRate) {
+        if (inputRate == 44100)
+            return input;
+
+        // Simple linear interpolation
+        float ratio = 44100.0f / inputRate;
+        int newLength = (int) (input.length * ratio);
+        float[] output = new float[newLength];
+
+        for (int i = 0; i < newLength; i++) {
+            float srcIdx = i / ratio;
+            int idx = (int) srcIdx;
+            if (idx >= input.length - 1) {
+                output[i] = input[input.length - 1];
+            } else {
+                float frac = srcIdx - idx;
+                output[i] = input[idx] * (1 - frac) + input[idx + 1] * frac;
+            }
+        }
+        return output;
     }
 
     // Detect full beat grid with phase alignment
@@ -132,10 +180,11 @@ public class SimpleBPMDetector {
             float bpm = detectBPMFromSamples(audioSamples, sampleRate);
 
             // Compute onset strength and find phase
-            float[] onsetStrength = computeOnsetStrength(audioSamples, sampleRate);
+            // Compute onset strength and find phase using higher resolution
+            float[] onsetStrength = computeOnsetStrength(audioSamples, sampleRate, BEAT_GRID_HOP_LENGTH);
             float[] onsetHWR = halfWaveRectify(onsetStrength);
             float period = 60.0f / bpm;
-            float phase = findPhaseOffset(onsetHWR, period, sampleRate);
+            float phase = findPhaseOffset(onsetHWR, period, sampleRate, BEAT_GRID_HOP_LENGTH);
 
             Log.d(TAG, "Phase offset: " + phase + "s");
 
@@ -165,18 +214,18 @@ public class SimpleBPMDetector {
         } catch (Exception e) {
             Log.e(TAG, "Error detecting beat grid", e);
             // Return minimal beat grid with defaults
-            float[] defaultBeats = new float[]{0.0f};
-            float[] defaultDownbeats = new float[]{0.0f};
+            float[] defaultBeats = new float[] { 0.0f };
+            float[] defaultDownbeats = new float[] { 0.0f };
             return new BeatGrid(defaultBeats, defaultDownbeats, 175.0f, 0.0f);
         }
     }
 
     // Find phase offset by testing different phases using floating-point precision
-    private float findPhaseOffset(float[] onsetHWR, float period, int sampleRate) {
-        int numPhases = 64;  // Doubled resolution for better accuracy
+    private float findPhaseOffset(float[] onsetHWR, float period, int sampleRate, int hopSize) {
+        int numPhases = PHASE_CANDIDATES; // High resolution for better accuracy
         float bestPhase = 0.0f;
         float bestScore = 0.0f;
-        float framesPerSecond = (float) sampleRate / HOP_LENGTH;
+        float framesPerSecond = (float) sampleRate / hopSize;
 
         for (int p = 0; p < numPhases; p++) {
             float phase = (p / (float) numPhases) * period;
@@ -199,11 +248,11 @@ public class SimpleBPMDetector {
         return bestPhase;
     }
 
-
     // Interpolate onset strength for sub-frame accuracy
     private float interpolatedOnset(float[] onset, float framePos) {
         int idx = (int) framePos;
-        if (idx >= onset.length - 1) return onset[onset.length - 1];
+        if (idx >= onset.length - 1)
+            return onset[onset.length - 1];
         float frac = framePos - idx;
         return onset[idx] * (1 - frac) + onset[idx + 1] * frac;
     }
@@ -211,7 +260,7 @@ public class SimpleBPMDetector {
     // Detect downbeats (every 4 beats for 4/4 time)
     private float[] detectDownbeats(float[] beats) {
         if (beats.length < 4) {
-            return beats;  // Not enough beats
+            return beats; // Not enough beats
         }
 
         // Every 4th beat is a downbeat
@@ -225,105 +274,12 @@ public class SimpleBPMDetector {
         return downbeats;
     }
 
-    // Find cue points from pre-extracted waveform data
-    public CuePoints findCuePointsFromWaveform(float[] waveformData, float bpm, long durationMs) {
-        Log.d(TAG, "Finding cue points from waveform, BPM=" + bpm + ", points=" + waveformData.length);
-
-        // Default fallback values
-        float defaultCueIn = 0.0f;
-        float defaultCueOut = 0.8f;
-
-        try {
-            if (waveformData == null || waveformData.length < 100 || bpm <= 0) {
-                Log.w(TAG, "Insufficient data for cue point detection");
-                return new CuePoints((long)(defaultCueIn * durationMs * 44.1f),
-                                    (long)(defaultCueOut * durationMs * 44.1f));
-            }
-
-            // Calculate bar dimensions in waveform points
-            float barDurationSec = 4 * 60.0f / bpm;  // 4 beats per bar
-            float trackDurationSec = durationMs / 1000.0f;
-            int pointsPerBar = (int) (waveformData.length * barDurationSec / trackDurationSec);
-            if (pointsPerBar < 1) pointsPerBar = 1;
-
-            int numBars = waveformData.length / pointsPerBar;
-            if (numBars < 8) {
-                Log.w(TAG, "Track too short: " + numBars + " bars");
-                return new CuePoints(0, (long)(defaultCueOut * durationMs * 44.1f));
-            }
-
-            // Compute per-bar energy (RMS of absolute waveform values)
-            float[] barEnergies = new float[numBars];
-            float totalEnergy = 0;
-            for (int bar = 0; bar < numBars; bar++) {
-                float sum = 0;
-                int start = bar * pointsPerBar;
-                int end = Math.min(start + pointsPerBar, waveformData.length);
-                for (int i = start; i < end; i++) {
-                    sum += Math.abs(waveformData[i]);
-                }
-                barEnergies[bar] = sum / (end - start);
-                totalEnergy += barEnergies[bar];
-            }
-            float meanEnergy = totalEnergy / numBars;
-
-            // Find cue-in: low energy bar ~30s in
-            int startSearchBar = Math.max(1, (int) (30.0f / barDurationSec));
-            startSearchBar = Math.min(startSearchBar, numBars / 4);
-
-            float cueInNorm = defaultCueIn;
-            for (int bar = startSearchBar; bar < Math.min(startSearchBar + 16, numBars / 2); bar++) {
-                if (barEnergies[bar] < 0.7f * meanEnergy) {
-                    // Also check next bar to avoid transient dips
-                    if (bar + 1 < numBars && barEnergies[bar + 1] < 0.8f * meanEnergy) {
-                        cueInNorm = (float) bar / numBars;
-                        Log.d(TAG, "Found cue-in at bar " + bar);
-                        break;
-                    }
-                }
-            }
-
-            // Find cue-out: high energy bar in second half
-            int endSearchBar = numBars - 16;  // Stop 16 bars before end
-            int startMidSearch = Math.max(numBars / 2, (int)(cueInNorm * numBars) + 8);
-
-            float cueOutNorm = defaultCueOut;
-            for (int bar = startMidSearch; bar < endSearchBar; bar++) {
-                if (barEnergies[bar] > meanEnergy) {
-                    cueOutNorm = (float) bar / numBars;
-                    Log.d(TAG, "Found cue-out at bar " + bar);
-                    break;
-                }
-            }
-
-            // Ensure minimum 8 bars between cue-in and cue-out
-            int cueInBar = (int)(cueInNorm * numBars);
-            int cueOutBar = (int)(cueOutNorm * numBars);
-            if (cueOutBar - cueInBar < 8) {
-                cueOutNorm = Math.min((float)(cueInBar + 8) / numBars, defaultCueOut);
-                Log.d(TAG, "Adjusted cue-out to ensure minimum 8-bar gap");
-            }
-
-            // Convert to sample positions (assuming 44100 Hz)
-            long totalSamples = (long) (durationMs * 44.1f);
-            long cueInSample = (long) (cueInNorm * totalSamples);
-            long cueOutSample = (long) (cueOutNorm * totalSamples);
-
-            Log.d(TAG, "Cue points: in=" + cueInNorm + ", out=" + cueOutNorm);
-            return new CuePoints(cueInSample, cueOutSample);
-
-        } catch (Exception e) {
-            Log.e(TAG, "Error in fast cue point detection", e);
-            long totalSamples = (long) (durationMs * 44.1f);
-            return new CuePoints(0, (long)(defaultCueOut * totalSamples));
-        }
-    }
-
     // Find optimal cue points for DJ transitions based on energy analysis
     public CuePoints findCuePoints(float[] audioSamples, int sampleRate, float bpm) {
         Log.d(TAG, "Finding cue points for BPM=" + bpm + ", samples=" + audioSamples.length);
 
-        // Default fallback values (80% point for cue-out, matching current mixer behavior)
+        // Default fallback values (80% point for cue-out, matching current mixer
+        // behavior)
         long defaultCueIn = 0;
         long defaultCueOut = (long) (audioSamples.length * 0.8f);
 
@@ -333,8 +289,20 @@ public class SimpleBPMDetector {
                 return new CuePoints(defaultCueIn, defaultCueOut);
             }
 
+            // Normalization: Run energy analysis at 44100Hz for consistency
+            float[] samples = audioSamples;
+            int analysisRate = sampleRate;
+            boolean wasResampled = false;
+
+            if (sampleRate != 44100) {
+                Log.d(TAG, "Resampling from " + sampleRate + " to 44100Hz for cue point detection");
+                samples = resampleTo44100(audioSamples, sampleRate);
+                analysisRate = 44100;
+                wasResampled = true;
+            }
+
             // Compute onset strength
-            float[] onsetStrength = computeOnsetStrength(audioSamples, sampleRate);
+            float[] onsetStrength = computeOnsetStrength(samples, analysisRate);
             if (onsetStrength.length < 10) {
                 Log.w(TAG, "Track too short for cue point detection");
                 return new CuePoints(defaultCueIn, defaultCueOut);
@@ -342,9 +310,10 @@ public class SimpleBPMDetector {
 
             // Calculate bar dimensions
             float barDurationSec = 4 * 60.0f / bpm;
-            int barDurationSamples = (int) (barDurationSec * sampleRate);
+            int barDurationSamples = (int) (barDurationSec * analysisRate);
             int framesPerBar = barDurationSamples / HOP_LENGTH;
-            if (framesPerBar < 1) framesPerBar = 1;
+            if (framesPerBar < 1)
+                framesPerBar = 1;
 
             // Calculate number of complete bars
             int numBars = onsetStrength.length / framesPerBar;
@@ -375,7 +344,7 @@ public class SimpleBPMDetector {
             int startSearchBar = Math.max(1, (int) (30.0f / barDurationSec));
             int endCueInSearch = Math.min((int) (45.0f / barDurationSec), numBars / 3);
 
-            long cueInSample = defaultCueIn;
+            long cueInSample = 0; // Default to 0 at analysis rate
             boolean foundCueIn = false;
 
             for (int bar = startSearchBar; bar < endCueInSearch; bar++) {
@@ -383,7 +352,7 @@ public class SimpleBPMDetector {
                 if (barEnergies[bar] < 0.7f * meanEnergy) {
                     // Also check next bar to avoid transient dips
                     if (bar + 1 < numBars && barEnergies[bar + 1] < 0.8f * meanEnergy) {
-                        cueInSample = (long) (bar * barDurationSec * sampleRate);
+                        cueInSample = (long) (bar * barDurationSec * analysisRate);
                         Log.d(TAG, String.format("Found cue-in at bar %d (~%.1fs, energy=%.3f, %.0f%% of mean)",
                                 bar, bar * barDurationSec, barEnergies[bar], 100 * barEnergies[bar] / meanEnergy));
                         foundCueIn = true;
@@ -397,18 +366,18 @@ public class SimpleBPMDetector {
             }
 
             // Find cue-out point (high energy bar in 60-75% range)
-            int cueOutStart = (int) (numBars * 0.60f);  // Start at 60%
-            int cueOutEnd = Math.min((int) (numBars * 0.75f), numBars - 16);  // End at 75% or 16 bars before end
-            int cueInBar = (int) (cueInSample / (barDurationSec * sampleRate));
-            cueOutStart = Math.max(cueOutStart, cueInBar + 8);  // Ensure at least 8 bars after cue-in
+            int cueOutStart = (int) (numBars * 0.60f); // Start at 60%
+            int cueOutEnd = Math.min((int) (numBars * 0.75f), numBars - 16); // End at 75% or 16 bars before end
+            int cueInBar = (int) (cueInSample / (barDurationSec * analysisRate));
+            cueOutStart = Math.max(cueOutStart, cueInBar + 8); // Ensure at least 8 bars after cue-in
 
-            long cueOutSample = defaultCueOut;
+            long cueOutSample = (long) (samples.length * 0.8f); // Default at analysis rate
             boolean foundCueOut = false;
 
             for (int bar = cueOutStart; bar < cueOutEnd; bar++) {
                 // Look for high energy bar
                 if (barEnergies[bar] > meanEnergy) {
-                    cueOutSample = (long) (bar * barDurationSec * sampleRate);
+                    cueOutSample = (long) (bar * barDurationSec * analysisRate);
                     Log.d(TAG, String.format("Found cue-out at bar %d (~%.1fs, energy=%.3f, %.0f%% through track)",
                             bar, bar * barDurationSec, barEnergies[bar], 100.0f * bar / numBars));
                     foundCueOut = true;
@@ -418,15 +387,25 @@ public class SimpleBPMDetector {
 
             if (!foundCueOut) {
                 // Fallback: use 70% through track if no high-energy section found
-                cueOutSample = (long) (audioSamples.length * 0.70f);
+                // Note: using 70% of analysis samples
+                cueOutSample = (long) (samples.length * 0.70f);
                 Log.d(TAG, "No ideal cue-out found, using 70% point");
             }
 
             // Ensure minimum 8 bars between cue-in and cue-out
-            float minGapSamples = 8 * barDurationSec * sampleRate;
+            float minGapSamples = 8 * barDurationSec * analysisRate;
             if (cueOutSample - cueInSample < minGapSamples) {
-                cueOutSample = Math.min((long) (cueInSample + minGapSamples), defaultCueOut);
+                cueOutSample = Math.min((long) (cueInSample + minGapSamples), (long) (samples.length * 0.8f));
                 Log.d(TAG, "Adjusted cue-out to ensure minimum gap");
+            }
+
+            // Convert back to original sample rate domain if we resampled
+            if (wasResampled) {
+                double ratio = (double) sampleRate / 44100.0;
+                cueInSample = (long) (cueInSample * ratio);
+                cueOutSample = (long) (cueOutSample * ratio);
+                Log.d(TAG, "Converted cue points back to " + sampleRate + "Hz: in=" + cueInSample + ", out="
+                        + cueOutSample);
             }
 
             Log.d(TAG, "Final cue points: in=" + cueInSample + ", out=" + cueOutSample);
@@ -438,14 +417,16 @@ public class SimpleBPMDetector {
         }
     }
 
-    private float[] decodeAudioFile(String filePath) {
+    private AudioData decodeAudioFile(String filePath) {
         MediaExtractor extractor = new MediaExtractor();
         MediaCodec decoder = null;
 
-        // Pre-allocate buffer: 5s × 48000Hz × 2 channels (enough for BPM detection)
-        final int ESTIMATED_SAMPLES = 5 * 48000 * 2;
+        // Decode audio (30 seconds needed for stable BPM)
+        // Pre-allocate buffer: 30s × 48000Hz × 2 channels
+        final int ESTIMATED_SAMPLES = 30 * 48000 * 2;
         float[] sampleBuffer = new float[ESTIMATED_SAMPLES];
         int sampleCount = 0;
+        int detectedSampleRate = 44100; // Default
 
         try {
             extractor.setDataSource(filePath);
@@ -470,6 +451,25 @@ public class SimpleBPMDetector {
             MediaFormat format = extractor.getTrackFormat(audioTrackIndex);
             String mime = format.getString(MediaFormat.KEY_MIME);
 
+            // Get sample rate from format
+            if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                detectedSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+                Log.d(TAG, "Detected sample rate: " + detectedSampleRate);
+            }
+
+            // Seek to 30 seconds to skip intro
+            long durationUs = format.containsKey(MediaFormat.KEY_DURATION) ? format.getLong(MediaFormat.KEY_DURATION)
+                    : 0;
+            long seekTimeUs = 30_000_000; // 30 seconds
+
+            // If track is short (e.g. < 45s), seek to start or proportionate point
+            if (durationUs > 0 && seekTimeUs > durationUs - 10_000_000) {
+                seekTimeUs = 0; // Too short, start from beginning
+            }
+
+            extractor.seekTo(seekTimeUs, MediaExtractor.SEEK_TO_CLOSEST_SYNC);
+            Log.d(TAG, "Seeked to " + seekTimeUs / 1000000.0f + "s for BPM detection");
+
             // Create decoder
             decoder = MediaCodec.createDecoderByType(mime);
             decoder.configure(format, null, null, 0);
@@ -480,8 +480,8 @@ public class SimpleBPMDetector {
             boolean isEOS = false;
             long timeoutUs = 10000;
 
-            // Limit to first 5 seconds for BPM detection (sufficient for D&B 160-190 BPM)
-            long maxDurationUs = 5_000_000;  // 5 seconds in microseconds
+            // Limit to 30 seconds for BPM detection (improved accuracy)
+            long maxDurationUs = seekTimeUs + 30_000_000;
 
             while (!isEOS) {
                 // Input
@@ -495,7 +495,8 @@ public class SimpleBPMDetector {
                         isEOS = true;
                     } else {
                         long presentationTimeUs = extractor.getSampleTime();
-                        if (presentationTimeUs > maxDurationUs) {
+                        if (presentationTimeUs > maxDurationUs && sampleCount > 44100 * 5) {
+                            // Only stop if we have enough samples
                             decoder.queueInputBuffer(inputIndex, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
                             isEOS = true;
                         } else {
@@ -530,10 +531,15 @@ public class SimpleBPMDetector {
                         break;
                     }
 
+                    // Check if buffer is full
+                    if (sampleCount >= sampleBuffer.length) {
+                        isEOS = true;
+                        break;
+                    }
+
                     outputIndex = decoder.dequeueOutputBuffer(info, timeoutUs);
                 }
             }
-
         } catch (IOException e) {
             Log.e(TAG, "Error decoding audio", e);
             return null;
@@ -550,13 +556,16 @@ public class SimpleBPMDetector {
         System.arraycopy(sampleBuffer, 0, samples, 0, sampleCount);
 
         Log.d(TAG, "Decoded " + samples.length + " samples");
-        return samples;
+        return new AudioData(samples, detectedSampleRate);
     }
 
     private float[] computeOnsetStrength(float[] audio, int sampleRate) {
+        return computeOnsetStrength(audio, sampleRate, HOP_LENGTH);
+    }
+
+    private float[] computeOnsetStrength(float[] audio, int sampleRate, int hopSize) {
         // Simple onset strength using energy (RMS) in frames
-        int frameSize = 2048;
-        int hopSize = HOP_LENGTH;
+        int frameSize = 2048; // Keep window large for energy averaging but hop small for resolution
         int numFrames = (audio.length - frameSize) / hopSize + 1;
 
         float[] onsetStrength = new float[numFrames];
@@ -630,14 +639,14 @@ public class SimpleBPMDetector {
             float im = fftData[2 * i + 1];
             float power = re * re + im * im;
             fftData[2 * i] = power;
-            fftData[2 * i + 1] = 0;  // Imaginary part is 0 for power spectrum
+            fftData[2 * i + 1] = 0; // Imaginary part is 0 for power spectrum
         }
 
         // Perform inverse FFT
         fft.complexInverse(fftData, true);
 
         // Extract real part (autocorrelation) and normalize
-        int maxLag = Math.min(n, 1000);  // Same limit as before
+        int maxLag = Math.min(n, 1000); // Same limit as before
         float[] autocorr = new float[maxLag];
         float normFactor = fftData[0] > 0 ? 1.0f / fftData[0] : 1.0f;
 
@@ -685,13 +694,16 @@ public class SimpleBPMDetector {
         Collections.sort(candidates);
 
         if (candidates.isEmpty()) {
-            return 175.0f;  // Default
+            return 175.0f; // Default
         }
 
         // Get best lag and original tempo
         int bestLag = candidates.get(0).lag;
         int originalLag = bestLag;
-        float tempo = 60.0f / (bestLag * HOP_LENGTH / (float) sampleRate);
+
+        // Use parabolic interpolation for sub-sample precision
+        float refinedBestLag = refineLag(autocorr, bestLag);
+        float tempo = 60.0f / (refinedBestLag * HOP_LENGTH / (float) sampleRate);
         float originalTempo = tempo;
 
         // Half-time detection: if tempo < 100, try doubling it
@@ -710,7 +722,8 @@ public class SimpleBPMDetector {
                         countHalf++;
                     }
                 }
-                if (countHalf > 0) scoreHalf /= countHalf;
+                if (countHalf > 0)
+                    scoreHalf /= countHalf;
 
                 // Calculate score at original lag
                 float scoreOriginal = 0;
@@ -722,7 +735,8 @@ public class SimpleBPMDetector {
                         countOriginal++;
                     }
                 }
-                if (countOriginal > 0) scoreOriginal /= countOriginal;
+                if (countOriginal > 0)
+                    scoreOriginal /= countOriginal;
 
                 // Use doubled tempo if half-lag score is reasonable
                 if (scoreHalf > scoreOriginal * 0.4f) {
@@ -749,7 +763,8 @@ public class SimpleBPMDetector {
                         countDouble++;
                     }
                 }
-                if (countDouble > 0) scoreDouble /= countDouble;
+                if (countDouble > 0)
+                    scoreDouble /= countDouble;
 
                 // Calculate score at original lag
                 float scoreOriginal = 0;
@@ -761,11 +776,13 @@ public class SimpleBPMDetector {
                         countOriginal++;
                     }
                 }
-                if (countOriginal > 0) scoreOriginal /= countOriginal;
+                if (countOriginal > 0)
+                    scoreOriginal /= countOriginal;
 
                 // Use halved tempo if double-lag score is reasonable
                 if (scoreDouble > scoreOriginal * 0.8f) {
-                    Log.d(TAG, String.format("Double-time correction: %.1f BPM -> %.1f BPM (half-time feel)", tempo, halfTempo));
+                    Log.d(TAG, String.format("Double-time correction: %.1f BPM -> %.1f BPM (half-time feel)", tempo,
+                            halfTempo));
                     tempo = halfTempo;
                     bestLag = doubleLag;
                 }
@@ -776,5 +793,52 @@ public class SimpleBPMDetector {
         tempo = Math.max(MIN_BPM, Math.min(MAX_BPM, tempo));
 
         return tempo;
+    }
+
+    /**
+     * Refine lag estimate using parabolic interpolation around the peak.
+     * This allows for sub-sample precision in the lag estimate.
+     */
+    private float refineLag(float[] autocorr, int peakLag) {
+        if (peakLag <= 0 || peakLag >= autocorr.length - 1) {
+            return peakLag;
+        }
+
+        // y values at x-1, x, x+1
+        float y1 = autocorr[peakLag - 1];
+        float y2 = autocorr[peakLag];
+        float y3 = autocorr[peakLag + 1];
+
+        // Parabolic interpolation formula for peak location offset
+        float denominator = 2 * (2 * y2 - y1 - y3);
+        if (Math.abs(denominator) < 1e-9) {
+            return peakLag;
+        }
+
+        float delta = (y1 - y3) / denominator; // Note: simplified formula derivation often gives different signs based
+                                               // on convention
+        // Correct formula for peak offset d = (alpha - gamma) / (2 * (alpha - 2*beta +
+        // gamma)) where y1=alpha, y2=beta, y3=gamma
+        // Using standard vertex formula x = -b/2a from fitted parabola ax^2+bx+c
+        // Let x indices be -1, 0, 1.
+        // y(-1) = a - b + c = y1
+        // y(0) = c = y2
+        // y(1) = a + b + c = y3
+        // a = (y1 + y3)/2 - y2
+        // b = (y3 - y1)/2
+        // Peak offset = -b / (2a)
+
+        float a = (y1 + y3) / 2.0f - y2;
+        float b = (y3 - y1) / 2.0f;
+
+        if (Math.abs(a) < 1e-9)
+            return peakLag; // Linear or flat
+
+        float offset = -b / (2 * a);
+
+        // Clamp offset to [-0.5, 0.5] as it should be within the bin
+        offset = Math.max(-0.5f, Math.min(0.5f, offset));
+
+        return peakLag + offset;
     }
 }

@@ -2,15 +2,19 @@ package com.ece420.lab1;
 
 public class Track {
     private String name;
-    private String filePath;             // Original file path
-    private String stretchedFilePath;    // Pre-stretched file at 175 BPM (null if not yet processed)
-    private float bpm;                   // Original BPM
-    private float targetBpm = 175.0f;    // Target BPM for all tracks
-    private long cueInSample = 0;        // Sample position for mix-in point (0 = not set)
-    private long cueOutSample = 0;       // Sample position for mix-out point (0 = not set)
-    private long totalSamples = 0;       // Total samples in track (for normalization)
-    private float phase = 0.0f;          // Beat phase offset in seconds (where first beat starts)
-    private boolean isPreprocessed = false;  // Whether time stretching has been completed
+    private String filePath; // Original file path
+    private String stretchedFilePath; // Pre-stretched file at 175 BPM (null if not yet processed)
+    private float bpm; // Original BPM
+    private float targetBpm = 175.0f; // Target BPM for all tracks
+    private long cueInSample = 0; // Sample position for mix-in point (0 = not set)
+    private long cueOutSample = 0; // Sample position for mix-out point (0 = not set)
+    private long totalSamples = 0; // Total samples in track (for normalization)
+    private float phase = 0.0f; // Beat phase offset in seconds (where first beat starts)
+    private boolean isPreprocessed = false; // Whether time stretching has been completed
+
+    // Visualization state (0.0 to 1.0) - saved for UI persistence
+    private float displayMarkerStart = -1.0f;
+    private float displayMarkerEnd = -1.0f;
 
     public Track(String name, String filePath, float bpm) {
         this.name = name;
@@ -68,13 +72,15 @@ public class Track {
 
     // Get cue-out position normalized (0.0 to 1.0), returns -1 if not set
     public float getCueOutNormalized() {
-        if (cueOutSample <= 0 || totalSamples <= 0) return -1;
+        if (cueOutSample <= 0 || totalSamples <= 0)
+            return -1;
         return (float) cueOutSample / totalSamples;
     }
 
     // Get cue-in position normalized (0.0 to 1.0), returns -1 if not set
     public float getCueInNormalized() {
-        if (totalSamples <= 0) return -1;
+        if (totalSamples <= 0)
+            return -1;
         return (float) cueInSample / totalSamples;
     }
 
@@ -114,7 +120,7 @@ public class Track {
 
     // Create DJ-ready (175 BPM) track for DJ Transition mixes
     public static Track createDJReadyVersion(String name, String stretchedPath, float originalBpm,
-                                              long cueIn, long cueOut, long totalSamples, float phase) {
+            long cueIn, long cueOut, long totalSamples, float phase) {
         Track track = new Track(name, stretchedPath, originalBpm);
         track.stretchedFilePath = stretchedPath;
         track.isPreprocessed = true;
@@ -123,5 +129,32 @@ public class Track {
         track.totalSamples = totalSamples;
         track.phase = phase;
         return track;
+    }
+
+    public void setDisplayMarkers(float start, float end) {
+        this.displayMarkerStart = start;
+        this.displayMarkerEnd = end;
+    }
+
+    public boolean hasDisplayMarkers() {
+        return displayMarkerStart >= 0 && displayMarkerEnd >= 0;
+    }
+
+    public float getDisplayMarkerStart() {
+        return displayMarkerStart;
+    }
+
+    public float getDisplayMarkerEnd() {
+        return displayMarkerEnd;
+    }
+
+    private boolean isMixed = false;
+
+    public boolean isMixed() {
+        return isMixed;
+    }
+
+    public void setMixed(boolean mixed) {
+        isMixed = mixed;
     }
 }

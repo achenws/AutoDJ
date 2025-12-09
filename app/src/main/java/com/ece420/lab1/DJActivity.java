@@ -135,7 +135,7 @@ public class DJActivity extends Activity {
         waveformView.setSeekListener(normalizedPosition -> {
             long duration = audioPlayerManager.getDuration();
             if (duration > 0) {
-                long seekPosition = (long)(normalizedPosition * duration);
+                long seekPosition = (long) (normalizedPosition * duration);
                 audioPlayerManager.seekTo(seekPosition);
                 waveformView.setPlayheadPosition(normalizedPosition);
             }
@@ -143,8 +143,8 @@ public class DJActivity extends Activity {
 
         // Setup track list adapter
         trackAdapter = new ArrayAdapter<>(this,
-            android.R.layout.simple_list_item_1,
-            new ArrayList<String>());
+                android.R.layout.simple_list_item_1,
+                new ArrayList<String>());
         lvTrackList.setAdapter(trackAdapter);
 
         // Setup button listeners
@@ -194,7 +194,7 @@ public class DJActivity extends Activity {
         tvMixStatus = findViewById(R.id.tvMixStatus);
 
         // Setup transition type spinner
-        String[] transitionTypes = {"DJ Transition", "Simple Crossfade", "Overlap"};
+        String[] transitionTypes = { "DJ Transition", "Simple Crossfade", "Overlap" };
         ArrayAdapter<String> spinnerAdapter = new ArrayAdapter<>(this,
                 android.R.layout.simple_spinner_item, transitionTypes);
         spinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
@@ -206,15 +206,15 @@ public class DJActivity extends Activity {
         // Track selection toggle
         tvTrack1Selection.setOnClickListener(v -> {
             selectingTrack1 = true;
-            tvTrack1Selection.setBackgroundColor(0xFF90CAF9);  // Light blue
-            tvTrack2Selection.setBackgroundColor(0xFFE0E0E0);  // Gray
+            tvTrack1Selection.setBackgroundColor(0xFF90CAF9); // Light blue
+            tvTrack2Selection.setBackgroundColor(0xFFE0E0E0); // Gray
             Toast.makeText(this, "Tap a track to set as Track 1", Toast.LENGTH_SHORT).show();
         });
 
         tvTrack2Selection.setOnClickListener(v -> {
             selectingTrack1 = false;
-            tvTrack2Selection.setBackgroundColor(0xFF90CAF9);  // Light blue
-            tvTrack1Selection.setBackgroundColor(0xFFE0E0E0);  // Gray
+            tvTrack2Selection.setBackgroundColor(0xFF90CAF9); // Light blue
+            tvTrack1Selection.setBackgroundColor(0xFFE0E0E0); // Gray
             Toast.makeText(this, "Tap a track to set as Track 2", Toast.LENGTH_SHORT).show();
         });
     }
@@ -222,33 +222,33 @@ public class DJActivity extends Activity {
     private void checkPermissions() {
         if (android.os.Build.VERSION.SDK_INT >= 33) {
             // Android 13+ uses READ_MEDIA_AUDIO
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO)
-                != PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(this,
+                    Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.READ_MEDIA_AUDIO},
-                    PERMISSION_REQUEST_CODE);
+                        new String[] { Manifest.permission.READ_MEDIA_AUDIO },
+                        PERMISSION_REQUEST_CODE);
             }
         } else {
             // Older versions use READ_EXTERNAL_STORAGE
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
-                != PackageManager.PERMISSION_GRANTED) {
+            if (ContextCompat.checkSelfPermission(this,
+                    Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this,
-                    new String[]{Manifest.permission.READ_EXTERNAL_STORAGE},
-                    PERMISSION_REQUEST_CODE);
+                        new String[] { Manifest.permission.READ_EXTERNAL_STORAGE },
+                        PERMISSION_REQUEST_CODE);
             }
         }
     }
 
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
-                                          @NonNull int[] grantResults) {
+            @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == PERMISSION_REQUEST_CODE) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 Toast.makeText(this, "Permission granted", Toast.LENGTH_SHORT).show();
             } else {
                 Toast.makeText(this, "Permission denied. Cannot access audio files.",
-                    Toast.LENGTH_LONG).show();
+                        Toast.LENGTH_LONG).show();
             }
         }
     }
@@ -260,9 +260,8 @@ public class DJActivity extends Activity {
 
         try {
             startActivityForResult(
-                Intent.createChooser(intent, "Select an MP3 file"),
-                FILE_SELECT_CODE
-            );
+                    Intent.createChooser(intent, "Select an MP3 file"),
+                    FILE_SELECT_CODE);
         } catch (android.content.ActivityNotFoundException ex) {
             Toast.makeText(this, "Please install a file manager", Toast.LENGTH_SHORT).show();
         }
@@ -337,8 +336,7 @@ public class DJActivity extends Activity {
                                                     progressDialog.setMessage(status);
                                                 });
                                             }
-                                        }
-                                );
+                                        });
 
                                 if (result.success) {
                                     // Update track with preprocessed file path and phase
@@ -346,31 +344,51 @@ public class DJActivity extends Activity {
                                     track.setPhase(result.phase);
                                     Log.d(TAG, "Preprocessing complete, phase=" + result.phase);
 
-                                    // Step 3: Detect cue points on the STRETCHED audio
-                                    Log.d(TAG, "Detecting cue points on stretched audio...");
+                                    // Step 3: Detect cue points on the STRETCHED audio using accurate method
+                                    Log.d(TAG, "Detecting cue points on stretched audio (accurate mode)...");
                                     try {
-                                        // Extract waveform from stretched file for cue point detection
-                                        float[] stretchedWaveform = WaveformExtractor.extractWaveform(
-                                                result.stretchedFilePath, 1500);
+                                        // Load all audio samples for accurate cue point detection
+                                        AudioChunkReader reader = new AudioChunkReader(result.stretchedFilePath);
+                                        long totalSamples = reader.getTotalSamples();
+                                        int channels = reader.getChannelCount();
+                                        int sampleRate = reader.getSampleRate();
 
-                                        if (stretchedWaveform != null) {
-                                            // Calculate duration of stretched file
-                                            AudioChunkReader reader = new AudioChunkReader(result.stretchedFilePath);
-                                            long totalSamples = reader.getTotalSamples();
-                                            long durationMs = (long) (reader.getDurationSeconds() * 1000);
-                                            reader.close();
-
-                                            // Find cue points using 175 BPM (the stretched tempo)
-                                            SimpleBPMDetector.CuePoints cues = bpmDetector.findCuePointsFromWaveform(
-                                                    stretchedWaveform, 175.0f, durationMs);
-
-                                            track.setCueInSample(cues.cueInSample);
-                                            track.setCueOutSample(cues.cueOutSample);
-                                            track.setTotalSamples(totalSamples);
-
-                                            Log.d(TAG, String.format("Cue points detected on stretched audio - In: %d, Out: %d, Total: %d",
-                                                    cues.cueInSample, cues.cueOutSample, totalSamples));
+                                        // Read all chunks into a list
+                                        List<float[]> chunks = new ArrayList<>();
+                                        float[] chunk;
+                                        while ((chunk = reader.readNextChunk()) != null) {
+                                            chunks.add(chunk.clone());  // Clone to avoid buffer reuse issues
                                         }
+                                        reader.close();
+
+                                        // Concatenate chunks into single array
+                                        int totalLen = 0;
+                                        for (float[] c : chunks) totalLen += c.length;
+                                        float[] audioSamples = new float[totalLen];
+                                        int pos = 0;
+                                        for (float[] c : chunks) {
+                                            System.arraycopy(c, 0, audioSamples, pos, c.length);
+                                            pos += c.length;
+                                        }
+
+                                        Log.d(TAG, String.format("Loaded %d samples for cue detection (rate=%d, ch=%d)",
+                                                audioSamples.length, sampleRate, channels));
+
+                                        // Find cue points using accurate onset-based detection at 175 BPM
+                                        SimpleBPMDetector.CuePoints cues = bpmDetector.findCuePoints(
+                                                audioSamples, sampleRate, 175.0f);
+
+                                        // IMPORTANT: cues returns Sample Indices as if Mono (based on time).
+                                        // AudioMixer expects Interleaved Sample Indices (Time * Channels).
+                                        // We must scale by channel count.
+                                        track.setCueInSample(cues.cueInSample * channels);
+                                        track.setCueOutSample(cues.cueOutSample * channels);
+                                        track.setTotalSamples(totalSamples);
+
+                                        Log.d(TAG, String.format(
+                                                "Cue points detected (accurate) - In: %d, Out: %d, Total: %d (Channels: %d)",
+                                                track.getCueInSample(), track.getCueOutSample(), totalSamples,
+                                                channels));
                                     } catch (Exception e) {
                                         Log.w(TAG, "Cue point detection failed", e);
                                     }
@@ -412,10 +430,11 @@ public class DJActivity extends Activity {
                                         try {
                                             audioPlayerManager.loadTrack(originalTrack.getFilePath());
                                             // Extract waveform from original for display
-                                            displayWaveform(tempFile);
+                                            displayWaveform(tempFile, null);
                                         } catch (IOException e) {
                                             Log.e(TAG, "Error loading track", e);
-                                            Toast.makeText(DJActivity.this, "Error loading track", Toast.LENGTH_SHORT).show();
+                                            Toast.makeText(DJActivity.this, "Error loading track", Toast.LENGTH_SHORT)
+                                                    .show();
                                         }
 
                                         Toast.makeText(DJActivity.this,
@@ -450,7 +469,8 @@ public class DJActivity extends Activity {
                 e.printStackTrace();
                 mainHandler.post(() -> {
                     tvBPMValue.setText("Error");
-                    Toast.makeText(DJActivity.this, "Error processing file: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    Toast.makeText(DJActivity.this, "Error processing file: " + e.getMessage(), Toast.LENGTH_LONG)
+                            .show();
                 });
             }
         });
@@ -501,13 +521,13 @@ public class DJActivity extends Activity {
             if (selectingTrack1) {
                 track1ForMix = selectedTrack;
                 tvTrack1Selection.setText(selectedTrack.getName());
-                selectingTrack1 = false;  // Auto-switch to Track 2
+                selectingTrack1 = false; // Auto-switch to Track 2
                 tvTrack1Selection.setBackgroundColor(0xFFE0E0E0);
                 tvTrack2Selection.setBackgroundColor(0xFF90CAF9);
             } else {
                 track2ForMix = selectedTrack;
                 tvTrack2Selection.setText(selectedTrack.getName());
-                selectingTrack1 = true;  // Reset
+                selectingTrack1 = true; // Reset
                 tvTrack1Selection.setBackgroundColor(0xFFE0E0E0);
                 tvTrack2Selection.setBackgroundColor(0xFFE0E0E0);
             }
@@ -518,15 +538,27 @@ public class DJActivity extends Activity {
             // Keep existing playback logic
             currentTrack = selectedTrack;
             tvCurrentTrack.setText(currentTrack.getName());
-            tvBPMValue.setText(String.format("%.1f", currentTrack.getBpm()));
+
+            // Hide BPM for mixed tracks
+            if (currentTrack.isMixed()) {
+                tvBPMValue.setText("");
+            } else {
+                tvBPMValue.setText(String.format("%.1f", currentTrack.getBpm()));
+            }
 
             // Load track
             try {
                 audioPlayerManager.loadTrack(currentTrack.getFilePath());
                 btnPlay.setEnabled(true);
                 btnStop.setEnabled(true);
-                // Display waveform
-                displayWaveform(new File(currentTrack.getFilePath()));
+                // Display waveform with restored markers if they exist
+                displayWaveform(new File(currentTrack.getFilePath()), () -> {
+                    if (currentTrack.hasDisplayMarkers()) {
+                        waveformView.setCueMarkers(
+                                currentTrack.getDisplayMarkerStart(),
+                                currentTrack.getDisplayMarkerEnd());
+                    }
+                });
             } catch (IOException e) {
                 Log.e(TAG, "Error loading track", e);
                 Toast.makeText(this, "Error loading track", Toast.LENGTH_SHORT).show();
@@ -578,17 +610,16 @@ public class DJActivity extends Activity {
             try {
                 Log.d(TAG, "Starting mix operation...");
                 Log.d(TAG, "Track1 cue points - In: " + track1ForMix.getCueInSample() +
-                           ", Out: " + track1ForMix.getCueOutSample());
+                        ", Out: " + track1ForMix.getCueOutSample());
                 Log.d(TAG, "Track2 cue points - In: " + track2ForMix.getCueInSample() +
-                           ", Out: " + track2ForMix.getCueOutSample());
+                        ", Out: " + track2ForMix.getCueOutSample());
 
                 // Use the Track-based mix method which uses cue points
                 String outputPath = audioMixer.mix(
                         track1ForMix,
                         track2ForMix,
                         transitionType,
-                        getCacheDir()
-                );
+                        getCacheDir());
 
                 mainHandler.post(() -> {
                     if (outputPath != null) {
@@ -602,33 +633,93 @@ public class DJActivity extends Activity {
                             mixedName = mixedName.substring(0, mixedName.length() - 4);
                         }
                         Track mixedTrack = new Track(mixedName, outputPath, avgBpm);
+                        mixedTrack.setMixed(true);
 
-                        // Add to track list
+                        // Add to track list (hide BPM for mixes)
                         trackList.add(mixedTrack);
-                        trackAdapter.add(String.format("%s - %.1f BPM",
-                                mixedTrack.getName(), mixedTrack.getBpm()));
+                        trackAdapter.add(mixedTrack.getName());
                         trackAdapter.notifyDataSetChanged();
 
                         // Set as current and load for playback
                         currentTrack = mixedTrack;
                         tvCurrentTrack.setText(mixedTrack.getName());
-                        tvBPMValue.setText(String.format("%.1f", mixedTrack.getBpm()));
+                        tvBPMValue.setText(""); // Hide BPM for mix
 
                         try {
                             audioPlayerManager.loadTrack(outputPath);
                             btnPlay.setEnabled(true);
                             btnStop.setEnabled(true);
 
-                            // Display cue markers from track1 (the transition point)
-                            if (track1ForMix.hasCuePoints()) {
-                                float cueOutNorm = track1ForMix.getCueOutNormalized();
-                                float fadeEndNorm = Math.min(cueOutNorm + 0.1f, 1.0f);
-                                waveformView.setCueMarkers(cueOutNorm, fadeEndNorm);
-                                Log.d(TAG, "Cue markers set after mix: out=" + cueOutNorm);
-                            }
+                            // Extract and display waveform for mixed track with callback for markers
+                            displayWaveform(new File(outputPath), () -> {
+                                // Calculate marker position based on transition type
+                                float startMarkerNorm = -1;
+                                float endMarkerNorm = -1;
 
-                            // Extract and display waveform for mixed track
-                            displayWaveform(new File(outputPath));
+                                long totalMixDurationMs = audioPlayerManager.getDuration();
+                                if (totalMixDurationMs > 0) {
+                                    long startMs = 0;
+                                    long endMs = 0;
+
+                                    if (transitionType == 0) { // DJ Transition
+                                        // DJ Transition uses Preprocessed tracks (Interleaved Stereo samples)
+                                        // DJ Fade Duration (~65.8s)
+                                        long fadeMs = (long) (65.828f * 1000);
+
+                                        // CueOut is in Interleaved Samples (44.1k Stereo) - BUT preprocessed files are
+                                        // Mono (1 ch)
+                                        // So we treat samples as frames directly for 44.1k
+                                        long cueOutSamples = track1ForMix.getCueOutSample();
+                                        long cueOutMs = cueOutSamples * 1000 / 44100;
+
+                                        endMs = cueOutMs;
+                                        startMs = Math.max(0, endMs - fadeMs);
+
+                                        Log.d(TAG, "DJ Markers (Time): End=" + endMs + "ms, Start=" + startMs + "ms");
+
+                                    } else {
+                                        // Simple Fade / Overlap uses Original tracks
+                                        // Note: For Original tracks, setTotalSamples in displayWaveform sets it as (ms
+                                        // * 44.1)
+                                        // effectively Mono samples/frames.
+
+                                        // We can reconstruct duration from totalSamples
+                                        long track1TotalFrames = track1ForMix.getTotalSamples();
+                                        long track1DurationMs = (long) (track1TotalFrames / 44.1f);
+
+                                        // Fallback if totalSamples looks wrong (too small), use approximated duration
+                                        // But logic requires totalSamples for ratio.
+                                        // Logic: Start at 80% of Track 1, End at 100% of Track 1
+
+                                        startMs = (long) (track1DurationMs * 0.8f);
+                                        endMs = track1DurationMs;
+
+                                        Log.d(TAG, "Simple/Overlap Markers (Time): Duration=" + track1DurationMs +
+                                                "ms, Start=" + startMs + "ms, End=" + endMs + "ms");
+                                    }
+
+                                    startMarkerNorm = (float) startMs / totalMixDurationMs;
+                                    endMarkerNorm = (float) endMs / totalMixDurationMs;
+                                }
+
+                                if (startMarkerNorm > 0 && startMarkerNorm < 1.0f) {
+                                    // Clamp end marker
+                                    if (endMarkerNorm > 1.0f)
+                                        endMarkerNorm = 1.0f;
+
+                                    // Ensure visible width
+                                    if (endMarkerNorm <= startMarkerNorm) {
+                                        endMarkerNorm = Math.min(startMarkerNorm + 0.05f, 1.0f);
+                                    }
+
+                                    // Save to mixed track for persistence
+                                    mixedTrack.setDisplayMarkers(startMarkerNorm, endMarkerNorm);
+
+                                    waveformView.setCueMarkers(startMarkerNorm, endMarkerNorm);
+                                    Log.d(TAG, "Cue markers set after mix: start=" + startMarkerNorm + ", end="
+                                            + endMarkerNorm);
+                                }
+                            });
 
                             Toast.makeText(DJActivity.this, "Mix complete! Press Play",
                                     Toast.LENGTH_SHORT).show();
@@ -678,10 +769,10 @@ public class DJActivity extends Activity {
         btnPause.setEnabled(false);
         // Stop playhead updates and reset position
         playheadHandler.removeCallbacks(playheadUpdater);
-        waveformView.setPlayheadPosition(-1);  // Hide playhead
+        waveformView.setPlayheadPosition(-1); // Hide playhead
     }
 
-    private void displayWaveform(File audioFile) {
+    private void displayWaveform(File audioFile, Runnable onComplete) {
         Log.d(TAG, "displayWaveform called for file: " + audioFile.getAbsolutePath());
 
         // Show loading indicator on UI thread
@@ -696,11 +787,11 @@ public class DJActivity extends Activity {
 
                 // Extract waveform with target of 1500 points for good visualization
                 float[] waveformData = WaveformExtractor.extractWaveform(
-                    audioFile.getAbsolutePath(),
-                    1500
-                );
+                        audioFile.getAbsolutePath(),
+                        1500);
 
-                Log.d(TAG, "Waveform extraction completed. Data: " + (waveformData != null ? waveformData.length + " points" : "null"));
+                Log.d(TAG, "Waveform extraction completed. Data: "
+                        + (waveformData != null ? waveformData.length + " points" : "null"));
 
                 if (waveformData == null || waveformData.length == 0) {
                     Log.e(TAG, "Failed to extract waveform");
@@ -710,16 +801,36 @@ public class DJActivity extends Activity {
                     return;
                 }
 
-                // Detect cue points from waveform (fast - no extra decoding)
+                // Detect cue points using accurate onset-based detection
                 long durationMs = audioPlayerManager.getDuration();
                 if (currentTrack != null && currentTrack.getBpm() > 0 && durationMs > 0) {
                     try {
-                        SimpleBPMDetector.CuePoints cues = bpmDetector.findCuePointsFromWaveform(
-                                waveformData, currentTrack.getBpm(), durationMs);
-                        currentTrack.setCueInSample(cues.cueInSample);
-                        currentTrack.setCueOutSample(cues.cueOutSample);
-                        currentTrack.setTotalSamples((long)(durationMs * 44.1f));
-                        Log.d(TAG, "Fast cue points detected - In: " + cues.cueInSample + ", Out: " + cues.cueOutSample);
+                        // Load full audio for accurate cue detection
+                        AudioChunkReader cueReader = new AudioChunkReader(audioFile.getAbsolutePath());
+                        List<float[]> cueChunks = new ArrayList<>();
+                        float[] cueChunk;
+                        while ((cueChunk = cueReader.readNextChunk()) != null) {
+                            cueChunks.add(cueChunk.clone());
+                        }
+                        int sampleRate = cueReader.getSampleRate();
+                        int channels = cueReader.getChannelCount();
+                        cueReader.close();
+
+                        int totalLen = 0;
+                        for (float[] c : cueChunks) totalLen += c.length;
+                        float[] audioSamples = new float[totalLen];
+                        int pos = 0;
+                        for (float[] c : cueChunks) {
+                            System.arraycopy(c, 0, audioSamples, pos, c.length);
+                            pos += c.length;
+                        }
+
+                        SimpleBPMDetector.CuePoints cues = bpmDetector.findCuePoints(
+                                audioSamples, sampleRate, currentTrack.getBpm());
+                        currentTrack.setCueInSample(cues.cueInSample * channels);
+                        currentTrack.setCueOutSample(cues.cueOutSample * channels);
+                        currentTrack.setTotalSamples((long) (durationMs * 44.1f));
+                        Log.d(TAG, "Accurate cue points detected - In: " + cues.cueInSample + ", Out: " + cues.cueOutSample);
                     } catch (Exception e) {
                         Log.w(TAG, "Cue point detection failed", e);
                     }
@@ -730,8 +841,12 @@ public class DJActivity extends Activity {
                     waveformView.setWaveformData(waveformData);
                     Log.d(TAG, "Waveform displayed with " + waveformData.length + " points");
 
-                    // Clear cue markers when loading a track (markers only shown after mix)
+                    // Clear cue markers when loading a track
                     waveformView.clearMarkers();
+
+                    if (onComplete != null) {
+                        onComplete.run();
+                    }
 
                     Toast.makeText(DJActivity.this, "Waveform loaded!", Toast.LENGTH_SHORT).show();
                 });

@@ -14,19 +14,19 @@ public class AudioMixer {
     private static final String TAG = "AudioMixer";
 
     // Transition types
-    public static final int TRANSITION_DJ = 0;           // BPM matched + EQ crossfade
-    public static final int TRANSITION_SIMPLE_FADE = 1;  // Volume only, no BPM match
-    public static final int TRANSITION_OVERLAP = 2;      // Both tracks together
+    public static final int TRANSITION_DJ = 0; // BPM matched + EQ crossfade
+    public static final int TRANSITION_SIMPLE_FADE = 1; // Volume only, no BPM match
+    public static final int TRANSITION_OVERLAP = 2; // Both tracks together
 
     // Configuration
     private static final int SAMPLE_RATE = 44100;
-    private static final float TARGET_BPM = 175.0f;      // D&B standard
-    private static final int DJ_FADE_BARS = 48;          // 48 bars for DJ transition (~66 sec at 175 BPM)
-    private static final int SIMPLE_FADE_BARS = 48;      // 48 bars for simple fade (~66 sec at 175 BPM)
-    private static final int OVERLAP_BARS = 48;          // 48 bars for overlap (~66 sec at 175 BPM)
+    private static final float TARGET_BPM = 175.0f; // D&B standard
+    private static final int DJ_FADE_BARS = 48; // 48 bars for DJ transition (~66 sec at 175 BPM)
+    private static final int SIMPLE_FADE_BARS = 48; // 48 bars for simple fade (~66 sec at 175 BPM)
+    private static final int OVERLAP_BARS = 48; // 48 bars for overlap (~66 sec at 175 BPM)
 
     // Fallback duration when BPM unknown (48 bars at 175 BPM)
-    private static final float FALLBACK_FADE_SECONDS = 48 * 4 * 60.0f / 175.0f;  // ~65.8 seconds
+    private static final float FALLBACK_FADE_SECONDS = 48 * 4 * 60.0f / 175.0f; // ~65.8 seconds
 
     private SimpleBPMDetector bpmDetector;
     private SOLATimeStretcher timeStretcher;
@@ -64,7 +64,8 @@ public class AudioMixer {
     }
 
     private String removeExtension(String filename) {
-        if (filename == null) return "track";
+        if (filename == null)
+            return "track";
         int lastDot = filename.lastIndexOf('.');
         if (lastDot > 0) {
             return filename.substring(0, lastDot);
@@ -74,7 +75,8 @@ public class AudioMixer {
 
     // Remove invalid filename chars
     private String sanitizeFilename(String name) {
-        if (name == null || name.isEmpty()) return "track";
+        if (name == null || name.isEmpty())
+            return "track";
         // Remove invalid filename characters, keep alphanumeric, dash, underscore
         String sanitized = name.replaceAll("[^a-zA-Z0-9\\-_]", "_");
         // Limit length to avoid overly long filenames
@@ -85,7 +87,8 @@ public class AudioMixer {
     }
 
     private String getFilenameFromPath(String path) {
-        if (path == null) return "track";
+        if (path == null)
+            return "track";
         File file = new File(path);
         return file.getName();
     }
@@ -111,9 +114,9 @@ public class AudioMixer {
         Log.d(TAG, "Starting mix with cue points: " + track1.getName() + " -> " + track2.getName());
         Log.d(TAG, "Transition type: " + transitionType);
         Log.d(TAG, "Cue points: track1 out=" + track1.getCueOutSample() +
-                   ", track2 in=" + track2.getCueInSample());
+                ", track2 in=" + track2.getCueInSample());
         Log.d(TAG, "Preprocessed: track1=" + track1.isPreprocessed() +
-                   ", track2=" + track2.isPreprocessed());
+                ", track2=" + track2.isPreprocessed());
 
         // Use streaming for simple fade and overlap
         if (transitionType == TRANSITION_SIMPLE_FADE) {
@@ -131,7 +134,7 @@ public class AudioMixer {
         // Fallback to runtime time stretching
         Log.w(TAG, "Tracks not preprocessed, using runtime stretching");
         return mixDJOptimized(track1.getFilePath(), track2.getFilePath(),
-                              track1.getCueOutSample(), track2.getCueInSample(), outputDir);
+                track1.getCueOutSample(), track2.getCueInSample(), outputDir);
     }
 
     // DJ transition using preprocessed files (already at 175 BPM)
@@ -179,7 +182,7 @@ public class AudioMixer {
             Log.d(TAG, "Using stored phase for track 1: " + String.format("%.3fs", phase1));
 
             // Generate downbeat grid at 175 BPM with stored phase
-            float track1DurationSec = track1Samples / (float)(sampleRate * channels);
+            float track1DurationSec = track1Samples / (float) (sampleRate * channels);
             float[] downbeats175 = generateDownbeatGridWithPhase(TARGET_BPM, track1DurationSec, phase1);
             Log.d(TAG, "Generated " + downbeats175.length + " downbeats at 175 BPM");
 
@@ -194,10 +197,10 @@ public class AudioMixer {
                 // Snap to nearest downbeat for beat-matched mixing
                 transitionPoint = snapToNearestDownbeat(rawTransition, downbeats175, sampleRate, channels);
                 Log.d(TAG, "Using preprocessed cue-out: " + cueOut1 +
-                          ", raw transition: " + rawTransition +
-                          ", snapped to downbeat: " + transitionPoint);
+                        ", raw transition: " + rawTransition +
+                        ", snapped to downbeat: " + transitionPoint);
             } else {
-                long rawTransition = (long)(track1Samples * 0.8f) - fadeSamples;
+                long rawTransition = (long) (track1Samples * 0.8f) - fadeSamples;
                 rawTransition = Math.max(0, rawTransition);
                 transitionPoint = snapToNearestDownbeat(rawTransition, downbeats175, sampleRate, channels);
                 Log.d(TAG, "Using default 80% transition point, snapped to downbeat: " + transitionPoint);
@@ -206,7 +209,7 @@ public class AudioMixer {
             // Read fade region from Track 1
             Log.d(TAG, "Reading fade region from track 1...");
             reader1.skip(transitionPoint);
-            int fadeRegionLen = fadeSamples + (int)(5 * sampleRate); // Extra buffer
+            int fadeRegionLen = fadeSamples + (int) (5 * sampleRate); // Extra buffer
             float[] track1FadeRegion = new float[fadeRegionLen];
             int track1FadeRead = reader1.readSamples(track1FadeRegion, 0, fadeRegionLen);
             track1FadeRegion = trimArray(track1FadeRegion, track1FadeRead);
@@ -218,45 +221,50 @@ public class AudioMixer {
             long track2Samples = reader2.getTotalSamples();
             float phase2 = track2.getPhase();
             Log.d(TAG, "Track 1 phase: " + String.format("%.3fs", phase1) +
-                       ", Track 2 phase: " + String.format("%.3fs", phase2));
+                    ", Track 2 phase: " + String.format("%.3fs", phase2));
 
             // DIRECT BEAT CYCLE ALIGNMENT
             // Calculate where each track is within its beat cycle at the actual mix points,
             // then adjust track 2 so both are at the same beat position when mixed.
-            // This ensures beats align regardless of where each track's phase falls within a bar.
+            // This ensures beats align regardless of where each track's phase falls within
+            // a bar.
 
-            float beatPeriod = 60.0f / TARGET_BPM;  // ~0.343s at 175 BPM
+            float beatPeriod = 60.0f / TARGET_BPM; // ~0.343s at 175 BPM
 
             // Get transition point time in seconds
-            float transitionTimeSec = transitionPoint / (float)(sampleRate * channels);
+            float transitionTimeSec = transitionPoint / (float) (sampleRate * channels);
 
             // Where is track 1 within its beat cycle at the transition?
             float track1BeatPos = (transitionTimeSec - phase1) % beatPeriod;
-            if (track1BeatPos < 0) track1BeatPos += beatPeriod;  // Handle negative modulo
+            if (track1BeatPos < 0)
+                track1BeatPos += beatPeriod; // Handle negative modulo
 
             // Get cue-in time in seconds (use 0 if no cue point set)
-            float cueIn2TimeSec = (cueIn2 > 0 ? cueIn2 : 0) / (float)(sampleRate * channels);
+            float cueIn2TimeSec = (cueIn2 > 0 ? cueIn2 : 0) / (float) (sampleRate * channels);
 
             // Where is track 2 within its beat cycle at its cue-in?
             float track2BeatPos = (cueIn2TimeSec - phase2) % beatPeriod;
-            if (track2BeatPos < 0) track2BeatPos += beatPeriod;  // Handle negative modulo
+            if (track2BeatPos < 0)
+                track2BeatPos += beatPeriod; // Handle negative modulo
 
             // Calculate adjustment to align beat positions
             float adjustment = track1BeatPos - track2BeatPos;
 
             // Normalize to smallest adjustment [-beatPeriod/2, beatPeriod/2]
-            while (adjustment > beatPeriod / 2) adjustment -= beatPeriod;
-            while (adjustment < -beatPeriod / 2) adjustment += beatPeriod;
+            while (adjustment > beatPeriod / 2)
+                adjustment -= beatPeriod;
+            while (adjustment < -beatPeriod / 2)
+                adjustment += beatPeriod;
 
             // Apply adjustment to cue-in point
-            long adjustmentSamples = (long)(adjustment * sampleRate * channels);
+            long adjustmentSamples = (long) (adjustment * sampleRate * channels);
             long alignedCueIn2 = (cueIn2 > 0 ? cueIn2 : 0) + adjustmentSamples;
-            alignedCueIn2 = Math.max(0, alignedCueIn2);  // Don't go negative
+            alignedCueIn2 = Math.max(0, alignedCueIn2); // Don't go negative
 
             Log.d(TAG, String.format("Beat alignment: transition=%.3fs (beatPos=%.3fs), " +
-                       "cueIn=%.3fs (beatPos=%.3fs), adjustment=%.4fs (%.2f beats)",
-                       transitionTimeSec, track1BeatPos, cueIn2TimeSec, track2BeatPos,
-                       adjustment, adjustment / beatPeriod));
+                    "cueIn=%.3fs (beatPos=%.3fs), adjustment=%.4fs (%.2f beats)",
+                    transitionTimeSec, track1BeatPos, cueIn2TimeSec, track2BeatPos,
+                    adjustment, adjustment / beatPeriod));
             reader2.skip(alignedCueIn2);
             float[] track2FadeRegion = new float[fadeRegionLen];
             int track2FadeRead = reader2.readSamples(track2FadeRegion, 0, fadeRegionLen);
@@ -308,14 +316,15 @@ public class AudioMixer {
             long samplesWritten = 0;
             while (samplesWritten < transitionPoint) {
                 float[] chunk = reader1.readNextChunk();
-                if (chunk == null) break;
+                if (chunk == null)
+                    break;
 
                 long remaining = transitionPoint - samplesWritten;
                 if (chunk.length <= remaining) {
                     writer.writeChunk(chunk);
                     samplesWritten += chunk.length;
                 } else {
-                    writer.writeChunk(chunk, 0, (int)remaining);
+                    writer.writeChunk(chunk, 0, (int) remaining);
                     samplesWritten += remaining;
                 }
             }
@@ -347,15 +356,27 @@ public class AudioMixer {
             Log.e(TAG, "Error during preprocessed DJ mix", e);
             return null;
         } finally {
-            try { if (reader1 != null) reader1.close(); } catch (Exception ignored) {}
-            try { if (reader2 != null) reader2.close(); } catch (Exception ignored) {}
-            try { if (writer != null) writer.close(); } catch (Exception ignored) {}
+            try {
+                if (reader1 != null)
+                    reader1.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                if (reader2 != null)
+                    reader2.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                if (writer != null)
+                    writer.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 
     // DJ transition that processes only fade regions for efficiency
     private String mixDJOptimized(String track1Path, String track2Path,
-                                   long track1CueOut, long track2CueIn, File outputDir) {
+            long track1CueOut, long track2CueIn, File outputDir) {
         Log.d(TAG, "DJ Mix (Optimized): Processing fade regions only");
         Log.d(TAG, "Cue points: track1Out=" + track1CueOut + ", track2In=" + track2CueIn);
 
@@ -374,9 +395,14 @@ public class AudioMixer {
 
             Log.d(TAG, "Track 1: " + track1Samples + " samples, " + sampleRate + " Hz, " + channels + " ch");
 
-            // BPM detection from first 30 seconds
+            // BPM detection from middle (skip 30s to avoid intro)
             Log.d(TAG, "Detecting BPM...");
-            int bpmSampleCount = Math.min((int)(30 * sampleRate * channels), (int)track1Samples);
+            long skipSamples = 30L * sampleRate * channels;
+            if (track1Samples > skipSamples * 2) {
+                reader1.skip(skipSamples);
+            }
+
+            int bpmSampleCount = Math.min((int) (10 * sampleRate * channels), (int) track1Samples); // 10s is enough
             float[] bpmSamples1 = new float[bpmSampleCount];
             reader1.readSamples(bpmSamples1, 0, bpmSampleCount);
             float bpm1 = bpmDetector.detectBPMFromSamples(bpmSamples1, sampleRate);
@@ -385,8 +411,14 @@ public class AudioMixer {
             reader1.close();
             reader1 = new AudioChunkReader(track1Path);
 
-            // BPM for track 2
-            int bpmSampleCount2 = Math.min((int)(30 * sampleRate * channels), (int)reader2.getTotalSamples());
+            // BPM for track 2 (skip 30s)
+            long skipSamples2 = 30L * sampleRate * channels;
+            long track2Samples = reader2.getTotalSamples();
+            if (track2Samples > skipSamples2 * 2) {
+                reader2.skip(skipSamples2);
+            }
+
+            int bpmSampleCount2 = Math.min((int) (10 * sampleRate * channels), (int) track2Samples);
             float[] bpmSamples2 = new float[bpmSampleCount2];
             reader2.readSamples(bpmSamples2, 0, bpmSampleCount2);
             float bpm2 = bpmDetector.detectBPMFromSamples(bpmSamples2, sampleRate);
@@ -399,7 +431,7 @@ public class AudioMixer {
                 Log.d(TAG, "Generating beat grid for track 1 (for downbeat alignment)...");
 
                 // Generate full beat grid using detected BPM and track duration
-                float track1DurationSec = track1Samples / (float)(sampleRate * channels);
+                float track1DurationSec = track1Samples / (float) (sampleRate * channels);
                 beatGrid1 = generateBeatGridForDuration(
                         bpm1, track1DurationSec, bpmSamples1, sampleRate);
 
@@ -416,7 +448,7 @@ public class AudioMixer {
 
             // Calculate fade region
             int fadeSamples = crossfader.calculateFadeDuration(DJ_FADE_BARS, TARGET_BPM, 4);
-            int fadeRegionLen = fadeSamples + (int)(10 * sampleRate * channels);
+            int fadeRegionLen = fadeSamples + (int) (10 * sampleRate * channels);
 
             // Use detected cue point if available, otherwise default to 80% of track 1
             long transitionPoint;
@@ -432,7 +464,7 @@ public class AudioMixer {
                     Log.w(TAG, "Beat grid not available, using unaligned cue point");
                 }
             } else {
-                transitionPoint = (long)(track1Samples * 0.8f);
+                transitionPoint = (long) (track1Samples * 0.8f);
                 Log.d(TAG, "Using default 80% transition point: " + transitionPoint);
 
                 // **NEW: Snap default position too (if available)**
@@ -446,8 +478,8 @@ public class AudioMixer {
             transitionPoint = Math.max(0, transitionPoint - fadeSamples);
 
             Log.d(TAG, "Fade: " + fadeSamples + " samples, transition at: " + transitionPoint);
-            Log.d(TAG, "Fade region length: " + fadeRegionLen + " samples (~" + 
-                    String.format("%.1f", (float)fadeRegionLen / sampleRate / channels) + " seconds)");
+            Log.d(TAG, "Fade region length: " + fadeRegionLen + " samples (~" +
+                    String.format("%.1f", (float) fadeRegionLen / sampleRate / channels) + " seconds)");
 
             // Read fade region from Track 1
             Log.d(TAG, "Reading fade region from track 1...");
@@ -521,7 +553,8 @@ public class AudioMixer {
             long samplesWritten = 0;
             while (samplesWritten < transitionPoint) {
                 float[] chunk = reader1.readNextChunk();
-                if (chunk == null) break;
+                if (chunk == null)
+                    break;
 
                 long remaining = transitionPoint - samplesWritten;
                 if (chunk.length <= remaining) {
@@ -529,8 +562,8 @@ public class AudioMixer {
                     writer.writeChunk(chunk);
                     samplesWritten += chunk.length;
                 } else {
-                    float[] partial = new float[(int)remaining];
-                    System.arraycopy(chunk, 0, partial, 0, (int)remaining);
+                    float[] partial = new float[(int) remaining];
+                    System.arraycopy(chunk, 0, partial, 0, (int) remaining);
                     crossfader.applyPeakLimiter(partial, 0.95f);
                     writer.writeChunk(partial);
                     samplesWritten += remaining;
@@ -566,9 +599,21 @@ public class AudioMixer {
             Log.e(TAG, "Error during optimized DJ mix", e);
             return null;
         } finally {
-            try { if (reader1 != null) reader1.close(); } catch (Exception ignored) {}
-            try { if (reader2 != null) reader2.close(); } catch (Exception ignored) {}
-            try { if (writer != null) writer.close(); } catch (Exception ignored) {}
+            try {
+                if (reader1 != null)
+                    reader1.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                if (reader2 != null)
+                    reader2.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                if (writer != null)
+                    writer.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -576,7 +621,8 @@ public class AudioMixer {
      * Trim array to actual length.
      */
     private float[] trimArray(float[] array, int length) {
-        if (length >= array.length) return array;
+        if (length >= array.length)
+            return array;
         float[] result = new float[length];
         System.arraycopy(array, 0, result, 0, length);
         return result;
@@ -584,7 +630,8 @@ public class AudioMixer {
 
     /**
      * Generate a downbeat grid at a known tempo with detected phase offset.
-     * Matches the Python implementation which uses phase detection for beat alignment.
+     * Matches the Python implementation which uses phase detection for beat
+     * alignment.
      *
      * @param bpm         Known BPM (175 for preprocessed tracks)
      * @param durationSec Track duration in seconds
@@ -616,10 +663,10 @@ public class AudioMixer {
      * Generate a full beat grid for the entire track duration.
      * Detects phase from sample audio, then extrapolates beats to full duration.
      *
-     * @param bpm              Detected BPM
-     * @param durationSec      Full track duration in seconds
-     * @param sampleAudio      Sample audio for phase detection (e.g., first 30s)
-     * @param sampleRate       Sample rate in Hz
+     * @param bpm         Detected BPM
+     * @param durationSec Full track duration in seconds
+     * @param sampleAudio Sample audio for phase detection (e.g., first 30s)
+     * @param sampleRate  Sample rate in Hz
      * @return BeatGrid with beats and downbeats for full track
      */
     private SimpleBPMDetector.BeatGrid generateBeatGridForDuration(
@@ -630,7 +677,7 @@ public class AudioMixer {
         float phase = sampleGrid.phase;
 
         // Generate beats for full duration
-        float period = 60.0f / bpm;  // Seconds per beat
+        float period = 60.0f / bpm; // Seconds per beat
         java.util.List<Float> beatList = new java.util.ArrayList<>();
         float beatTime = phase;
 
@@ -659,10 +706,10 @@ public class AudioMixer {
      * Snap a sample position to the nearest downbeat for musical alignment.
      * This ensures transitions happen on bar boundaries (every 4 beats).
      *
-     * @param samplePos   Sample position to snap
-     * @param downbeats   Array of downbeat timestamps (in seconds)
-     * @param sampleRate  Sample rate in Hz
-     * @param channels    Number of audio channels
+     * @param samplePos  Sample position to snap
+     * @param downbeats  Array of downbeat timestamps (in seconds)
+     * @param sampleRate Sample rate in Hz
+     * @param channels   Number of audio channels
      * @return Snapped sample position on nearest downbeat
      */
     private long snapToNearestDownbeat(long samplePos, float[] downbeats, int sampleRate, int channels) {
@@ -714,13 +761,22 @@ public class AudioMixer {
             Log.d(TAG, "Source: " + actualSampleRate + " Hz, " + actualChannels + " channels");
 
             long track1Samples = reader1.getTotalSamples();
-            // Fade samples = 48 bars at 175 BPM (use fallback since no BPM detection for simple mode)
-            int fadeSamples = (int) (FALLBACK_FADE_SECONDS * actualSampleRate * actualChannels);
-            long transitionPoint = (long) (track1Samples * 0.8f);
-            transitionPoint = Math.max(0, transitionPoint - fadeSamples);
 
-            Log.d(TAG, "Track 1: " + track1Samples + " samples, transition at: " + transitionPoint);
-            Log.d(TAG, "Fade duration: " + fadeSamples + " samples");
+            // Calculate transition point at 80% of track 1
+            long transitionPoint = (long) (track1Samples * 0.8f);
+
+            // Fade duration is the remaining 20%
+            int fadeSamples = (int) (track1Samples - transitionPoint);
+
+            // Ensure even number of samples for stereo alignment
+            if (fadeSamples % 2 != 0)
+                fadeSamples--;
+            if (transitionPoint % 2 != 0)
+                transitionPoint++;
+
+            Log.d(TAG, "Track 1: " + track1Samples + " samples");
+            Log.d(TAG, "Transition Point (80%): " + transitionPoint);
+            Log.d(TAG, "Fade duration (remaining 20%): " + fadeSamples + " samples");
 
             // Open writer with actual sample rate and channel count from source
             String outputFilename = generateOutputFilename(
@@ -741,7 +797,8 @@ public class AudioMixer {
             int fadeOutRead = 0;
             while (fadeOutRead < fadeSamples) {
                 float[] chunk = reader1.readNextChunk();
-                if (chunk == null) break;
+                if (chunk == null)
+                    break;
                 int toCopy = Math.min(chunk.length, fadeSamples - fadeOutRead);
                 System.arraycopy(chunk, 0, fadeOut, fadeOutRead, toCopy);
                 fadeOutRead += toCopy;
@@ -751,7 +808,8 @@ public class AudioMixer {
             int fadeInRead = 0;
             while (fadeInRead < fadeSamples) {
                 float[] chunk = reader2.readNextChunk();
-                if (chunk == null) break;
+                if (chunk == null)
+                    break;
                 int toCopy = Math.min(chunk.length, fadeSamples - fadeInRead);
                 System.arraycopy(chunk, 0, fadeIn, fadeInRead, toCopy);
                 fadeInRead += toCopy;
@@ -768,7 +826,8 @@ public class AudioMixer {
             long samplesWritten = 0;
             while (samplesWritten < transitionPoint) {
                 float[] chunk = reader1.readNextChunk();
-                if (chunk == null) break;
+                if (chunk == null)
+                    break;
 
                 long remaining = transitionPoint - samplesWritten;
                 if (chunk.length <= remaining) {
@@ -777,8 +836,8 @@ public class AudioMixer {
                     samplesWritten += chunk.length;
                 } else {
                     // Partial write
-                    float[] partial = new float[(int)remaining];
-                    System.arraycopy(chunk, 0, partial, 0, (int)remaining);
+                    float[] partial = new float[(int) remaining];
+                    System.arraycopy(chunk, 0, partial, 0, (int) remaining);
                     crossfader.applyPeakLimiter(partial, 0.95f);
                     writer.writeChunk(partial);
                     samplesWritten += remaining;
@@ -807,9 +866,21 @@ public class AudioMixer {
             Log.e(TAG, "Error during streaming mix", e);
             return null;
         } finally {
-            try { if (reader1 != null) reader1.close(); } catch (Exception ignored) {}
-            try { if (reader2 != null) reader2.close(); } catch (Exception ignored) {}
-            try { if (writer != null) writer.close(); } catch (Exception ignored) {}
+            try {
+                if (reader1 != null)
+                    reader1.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                if (reader2 != null)
+                    reader2.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                if (writer != null)
+                    writer.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -836,14 +907,20 @@ public class AudioMixer {
             Log.d(TAG, "Source: " + actualSampleRate + " Hz, " + actualChannels + " channels");
 
             long track1Samples = reader1.getTotalSamples();
-            // Overlap samples = 48 bars at 175 BPM (use fallback since no BPM detection for overlap mode)
-            int overlapSamples = (int) (FALLBACK_FADE_SECONDS * actualSampleRate * actualChannels);
+            // Calculate overlap start at 80% of track 1
+            long overlapStart = (long) (track1Samples * 0.8f);
 
-            // Overlap starts this many samples before end of track 1
-            long overlapStart = Math.max(0, track1Samples - overlapSamples);
+            // Overlap duration is the remaining 20%
+            int overlapSamples = (int) (track1Samples - overlapStart);
+
+            // Ensure even number of samples for stereo alignment
+            if (overlapSamples % 2 != 0)
+                overlapSamples--;
+            if (overlapStart % 2 != 0)
+                overlapStart++;
 
             Log.d(TAG, "Track 1: " + track1Samples + " samples");
-            Log.d(TAG, "Overlap starts at: " + overlapStart + ", duration: " + overlapSamples + " samples");
+            Log.d(TAG, "Overlap starts at: " + overlapStart + " (80%), duration: " + overlapSamples + " samples");
 
             // Open writer with actual sample rate and channel count from source
             String outputFilename = generateOutputFilename(
@@ -857,7 +934,8 @@ public class AudioMixer {
             long samplesWritten = 0;
             while (samplesWritten < overlapStart) {
                 float[] chunk = reader1.readNextChunk();
-                if (chunk == null) break;
+                if (chunk == null)
+                    break;
 
                 long remaining = overlapStart - samplesWritten;
                 if (chunk.length <= remaining) {
@@ -878,7 +956,8 @@ public class AudioMixer {
             int tailRead = 0;
             while (tailRead < actualOverlapLen) {
                 float[] chunk = reader1.readNextChunk();
-                if (chunk == null) break;
+                if (chunk == null)
+                    break;
                 int toCopy = Math.min(chunk.length, actualOverlapLen - tailRead);
                 System.arraycopy(chunk, 0, track1Tail, tailRead, toCopy);
                 tailRead += toCopy;
@@ -889,7 +968,8 @@ public class AudioMixer {
             int headRead = 0;
             while (headRead < track2Head.length) {
                 float[] chunk = reader2.readNextChunk();
-                if (chunk == null) break;
+                if (chunk == null)
+                    break;
                 int toCopy = Math.min(chunk.length, track2Head.length - headRead);
                 System.arraycopy(chunk, 0, track2Head, headRead, toCopy);
                 headRead += toCopy;
@@ -899,7 +979,8 @@ public class AudioMixer {
             int mixLen = Math.min(tailRead, headRead);
             float[] overlapped = new float[mixLen];
             for (int i = 0; i < mixLen; i++) {
-                overlapped[i] = (track1Tail[i] + track2Head[i]) * 0.5f;
+                float sum = track1Tail[i] + track2Head[i];
+                overlapped[i] = Math.max(-1.0f, Math.min(1.0f, sum));
             }
             writer.writeChunk(overlapped);
 
@@ -920,26 +1001,37 @@ public class AudioMixer {
             Log.e(TAG, "Error during streaming mix", e);
             return null;
         } finally {
-            try { if (reader1 != null) reader1.close(); } catch (Exception ignored) {}
-            try { if (reader2 != null) reader2.close(); } catch (Exception ignored) {}
-            try { if (writer != null) writer.close(); } catch (Exception ignored) {}
+            try {
+                if (reader1 != null)
+                    reader1.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                if (reader2 != null)
+                    reader2.close();
+            } catch (Exception ignored) {
+            }
+            try {
+                if (writer != null)
+                    writer.close();
+            } catch (Exception ignored) {
+            }
         }
     }
 
-
     // Fine-tune beat alignment using onset correlation
     private long verifyAlignmentWithOnsetCorrelation(float[] track1Region, float[] track2Region,
-                                                      long initialOffset, int sampleRate, float bpm) {
+            long initialOffset, int sampleRate, float bpm) {
         // Search range: ±1 full beat period to handle significant phase drift
-        int beatSamples = (int)(sampleRate * 60.0f / bpm);
-        int hopSize = 256;  // Same as onset computation
+        int beatSamples = (int) (sampleRate * 60.0f / bpm);
+        int hopSize = 64; // significantly higher resolution for fine tuning (~1.5ms)
 
         // Compute onset strength for both regions
-        float[] onset1 = computeLocalOnsetStrength(track1Region, sampleRate);
-        float[] onset2 = computeLocalOnsetStrength(track2Region, sampleRate);
+        float[] onset1 = computeLocalOnsetStrength(track1Region, sampleRate, hopSize);
+        float[] onset2 = computeLocalOnsetStrength(track2Region, sampleRate, hopSize);
 
         // Search in frame steps for efficiency (each frame = hopSize samples)
-        int searchRangeFrames = beatSamples / hopSize;  // ~59 frames at 175 BPM
+        int searchRangeFrames = beatSamples / hopSize;
         float bestCorr = Float.NEGATIVE_INFINITY;
         int bestFrameOffset = 0;
 
@@ -953,13 +1045,12 @@ public class AudioMixer {
 
         long bestOffset = (long) bestFrameOffset * hopSize;
         Log.d(TAG, String.format("Onset fine-tune: offset=%d samples (%d frames), corr=%.3f",
-                                  bestOffset, bestFrameOffset, bestCorr));
+                bestOffset, bestFrameOffset, bestCorr));
         return bestOffset;
     }
 
     // Compute local onset strength for correlation-based alignment
-    private float[] computeLocalOnsetStrength(float[] audio, int sampleRate) {
-        int hopSize = 256;
+    private float[] computeLocalOnsetStrength(float[] audio, int sampleRate, int hopSize) {
         int frameSize = 1024;
         int numFrames = Math.max(1, (audio.length - frameSize) / hopSize + 1);
         float[] onset = new float[numFrames];
@@ -971,7 +1062,7 @@ public class AudioMixer {
             for (int j = 0; j < frameSize && start + j < audio.length; j++) {
                 energy += audio[start + j] * audio[start + j];
             }
-            energy = (float)Math.sqrt(energy / frameSize);
+            energy = (float) Math.sqrt(energy / frameSize);
             onset[i] = Math.max(0, energy - prevEnergy);
             prevEnergy = energy;
         }
@@ -995,7 +1086,8 @@ public class AudioMixer {
             }
         }
 
-        if (count == 0 || norm1 == 0 || norm2 == 0) return 0;
-        return sum / (float)(Math.sqrt(norm1) * Math.sqrt(norm2));
+        if (count == 0 || norm1 == 0 || norm2 == 0)
+            return 0;
+        return sum / (float) (Math.sqrt(norm1) * Math.sqrt(norm2));
     }
 }
