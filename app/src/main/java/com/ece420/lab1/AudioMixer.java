@@ -265,14 +265,25 @@ public class AudioMixer {
             // Fine-tune alignment using onset correlation
             long fineTuneOffset = verifyAlignmentWithOnsetCorrelation(
                     track1FadeRegion, track2FadeRegion, 0, sampleRate, TARGET_BPM);
-            int track2StartOffset = (int) Math.max(0, -fineTuneOffset);  // Shift track2 extraction if needed
+
+            // Apply offset to either track depending on direction
+            int track1StartOffset = 0;
+            int track2StartOffset = 0;
+            if (fineTuneOffset > 0) {
+                // Track2 needs to be delayed - start extraction later
+                track2StartOffset = (int) Math.min(fineTuneOffset, track2FadeRegion.length / 4);
+            } else if (fineTuneOffset < 0) {
+                // Track1 needs to be delayed - start extraction later
+                track1StartOffset = (int) Math.min(-fineTuneOffset, track1FadeRegion.length / 4);
+            }
+            Log.d(TAG, String.format("Fine-tune offsets: track1=%d, track2=%d", track1StartOffset, track2StartOffset));
 
             // Extract crossfade segments (no stretching needed)
             int actualFadeSamples = fadeSamples;
-            int outgoingLen = Math.min(actualFadeSamples, track1FadeRegion.length);
+            int outgoingLen = Math.min(actualFadeSamples, track1FadeRegion.length - track1StartOffset);
             int incomingLen = Math.min(actualFadeSamples, track2FadeRegion.length - track2StartOffset);
 
-            float[] outgoing = DSPUtils.extractFrame(track1FadeRegion, 0, outgoingLen);
+            float[] outgoing = DSPUtils.extractFrame(track1FadeRegion, track1StartOffset, outgoingLen);
             float[] incoming = DSPUtils.extractFrame(track2FadeRegion, track2StartOffset, incomingLen);
 
             // Perform EQ crossfade
@@ -919,29 +930,30 @@ public class AudioMixer {
     // Fine-tune beat alignment using onset correlation
     private long verifyAlignmentWithOnsetCorrelation(float[] track1Region, float[] track2Region,
                                                       long initialOffset, int sampleRate, float bpm) {
-        // Search range: ±1/8 beat period for fine-tuning
+        // Search range: ±1 full beat period to handle significant phase drift
         int beatSamples = (int)(sampleRate * 60.0f / bpm);
-        int searchRange = beatSamples / 8;
+        int hopSize = 256;  // Same as onset computation
 
         // Compute onset strength for both regions
         float[] onset1 = computeLocalOnsetStrength(track1Region, sampleRate);
         float[] onset2 = computeLocalOnsetStrength(track2Region, sampleRate);
 
-        // Find best correlation offset around initial alignment
+        // Search in frame steps for efficiency (each frame = hopSize samples)
+        int searchRangeFrames = beatSamples / hopSize;  // ~59 frames at 175 BPM
         float bestCorr = Float.NEGATIVE_INFINITY;
-        long bestOffset = initialOffset;
+        int bestFrameOffset = 0;
 
-        for (int delta = -searchRange; delta <= searchRange; delta++) {
-            long testOffset = initialOffset + delta;
-            float corr = computeOnsetCorrelation(onset1, onset2, (int)testOffset, sampleRate);
+        for (int deltaFrames = -searchRangeFrames; deltaFrames <= searchRangeFrames; deltaFrames++) {
+            float corr = computeOnsetCorrelationByFrames(onset1, onset2, deltaFrames);
             if (corr > bestCorr) {
                 bestCorr = corr;
-                bestOffset = testOffset;
+                bestFrameOffset = deltaFrames;
             }
         }
 
-        Log.d(TAG, String.format("Onset fine-tune: %d -> %d (corr=%.3f)",
-                                  initialOffset, bestOffset, bestCorr));
+        long bestOffset = (long) bestFrameOffset * hopSize;
+        Log.d(TAG, String.format("Onset fine-tune: offset=%d samples (%d frames), corr=%.3f",
+                                  bestOffset, bestFrameOffset, bestCorr));
         return bestOffset;
     }
 
@@ -966,18 +978,15 @@ public class AudioMixer {
         return onset;
     }
 
-    // Compute correlation between onset strength arrays
-    private float computeOnsetCorrelation(float[] onset1, float[] onset2, int offset, int sampleRate) {
-        int hopSize = 256;
-        int offsetFrames = offset / hopSize;
-
+    // Compute normalized cross-correlation between onset arrays with frame offset
+    private float computeOnsetCorrelationByFrames(float[] onset1, float[] onset2, int frameOffset) {
         float sum = 0;
         float norm1 = 0;
         float norm2 = 0;
         int count = 0;
 
         for (int i = 0; i < onset1.length; i++) {
-            int j = i + offsetFrames;
+            int j = i + frameOffset;
             if (j >= 0 && j < onset2.length) {
                 sum += onset1[i] * onset2[j];
                 norm1 += onset1[i] * onset1[i];
