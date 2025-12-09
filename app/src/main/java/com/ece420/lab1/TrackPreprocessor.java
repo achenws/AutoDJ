@@ -169,14 +169,16 @@ public class TrackPreprocessor {
             float phase = 0.0f;
             try {
                 SimpleBPMDetector bpmDetector = new SimpleBPMDetector();
-                // Use first 10 seconds for phase detection
-                int phaseSamples = Math.min(10 * SAMPLE_RATE, stretched.length);
-                float[] phaseAudio = new float[phaseSamples];
-                System.arraycopy(stretched, 0, phaseAudio, 0, phaseSamples);
+                // Use transition region (last 30 seconds) for phase detection - more relevant for mixing
+                int transitionDuration = 30 * SAMPLE_RATE;
+                int transitionStart = Math.max(0, stretched.length - transitionDuration);
+                int transitionLen = stretched.length - transitionStart;
+                float[] transitionAudio = new float[transitionLen];
+                System.arraycopy(stretched, transitionStart, transitionAudio, 0, transitionLen);
 
-                SimpleBPMDetector.BeatGrid beatGrid = bpmDetector.detectBeatGrid(phaseAudio, SAMPLE_RATE);
+                SimpleBPMDetector.BeatGrid beatGrid = bpmDetector.detectBeatGrid(transitionAudio, SAMPLE_RATE);
                 phase = beatGrid.phase;
-                Log.d(TAG, String.format("Beat phase detected: %.3fs (BPM check: %.1f)", phase, beatGrid.bpm));
+                Log.d(TAG, String.format("Beat phase detected from transition region: %.3fs (BPM check: %.1f)", phase, beatGrid.bpm));
             } catch (Exception e) {
                 Log.w(TAG, "Phase detection failed, using 0", e);
                 phase = 0.0f;
@@ -268,19 +270,22 @@ public class TrackPreprocessor {
             writer.close();
             reader.close();
 
-            // Detect phase from the output file
+            // Detect phase from transition region of output file (last 30 seconds)
             float phase = 0.0f;
             try {
                 AudioChunkReader phaseReader = new AudioChunkReader(outputPath);
-                int phaseSamples = Math.min(10 * SAMPLE_RATE, (int)phaseReader.getTotalSamples());
-                float[] phaseAudio = new float[phaseSamples];
-                phaseReader.readSamples(phaseAudio, 0, phaseSamples);
+                long phaseTotalSamples = phaseReader.getTotalSamples();
+                int transitionDuration = 30 * SAMPLE_RATE;
+                int transitionStart = (int) Math.max(0, phaseTotalSamples - transitionDuration);
+                int transitionLen = (int) (phaseTotalSamples - transitionStart);
+                float[] transitionAudio = new float[transitionLen];
+                phaseReader.readSamples(transitionAudio, transitionStart, transitionLen);
                 phaseReader.close();
 
                 SimpleBPMDetector bpmDetector = new SimpleBPMDetector();
-                SimpleBPMDetector.BeatGrid beatGrid = bpmDetector.detectBeatGrid(phaseAudio, SAMPLE_RATE);
+                SimpleBPMDetector.BeatGrid beatGrid = bpmDetector.detectBeatGrid(transitionAudio, SAMPLE_RATE);
                 phase = beatGrid.phase;
-                Log.d(TAG, String.format("Beat phase detected: %.3fs", phase));
+                Log.d(TAG, String.format("Beat phase detected from transition region: %.3fs", phase));
             } catch (Exception e) {
                 Log.w(TAG, "Phase detection failed, using 0", e);
             }

@@ -171,25 +171,23 @@ public class SimpleBPMDetector {
         }
     }
 
-    // Find phase offset by testing different phases
+    // Find phase offset by testing different phases using floating-point precision
     private float findPhaseOffset(float[] onsetHWR, float period, int sampleRate) {
-        int numPhases = 32;
+        int numPhases = 64;  // Doubled resolution for better accuracy
         float bestPhase = 0.0f;
         float bestScore = 0.0f;
+        float framesPerSecond = (float) sampleRate / HOP_LENGTH;
 
         for (int p = 0; p < numPhases; p++) {
             float phase = (p / (float) numPhases) * period;
             float score = 0.0f;
 
-            // Calculate phase in onset frames
-            int phaseFrames = (int) (phase * sampleRate / HOP_LENGTH);
-            int periodFrames = (int) (period * sampleRate / HOP_LENGTH);
-
-            // Sum onset strength at beat positions
-            int beatFrame = phaseFrames;
-            while (beatFrame < onsetHWR.length) {
-                score += onsetHWR[beatFrame];
-                beatFrame += periodFrames;
+            // Use floating-point accumulation to avoid integer truncation error
+            float beatTimeSeconds = phase;
+            while (beatTimeSeconds * framesPerSecond < onsetHWR.length - 1) {
+                float framePos = beatTimeSeconds * framesPerSecond;
+                score += interpolatedOnset(onsetHWR, framePos);
+                beatTimeSeconds += period;
             }
 
             if (score > bestScore) {
@@ -199,6 +197,15 @@ public class SimpleBPMDetector {
         }
 
         return bestPhase;
+    }
+
+
+    // Interpolate onset strength for sub-frame accuracy
+    private float interpolatedOnset(float[] onset, float framePos) {
+        int idx = (int) framePos;
+        if (idx >= onset.length - 1) return onset[onset.length - 1];
+        float frac = framePos - idx;
+        return onset[idx] * (1 - frac) + onset[idx + 1] * frac;
     }
 
     // Detect downbeats (every 4 beats for 4/4 time)

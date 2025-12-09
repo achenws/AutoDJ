@@ -10,7 +10,7 @@ public class SOLATimeStretcher {
     // SOLA parameters
     private static final int FRAME_LENGTH = 2048;
     private static final float OVERLAP_RATIO = 0.5f;
-    private static final float SEARCH_RATIO = 0.1f;
+    private static final float SEARCH_RATIO = 0.05f;  // Reduced from 0.1 to minimize phase drift
 
     private final int frameLength;
     private final int hopOutput;
