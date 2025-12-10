@@ -659,26 +659,29 @@ public class SimpleBPMDetector {
     }
 
     private float findBestTempo(float[] autocorr, int sampleRate) {
+        // Apply tempo prior to favor D&B range and reduce octave errors
+        float[] weightedAutocorr = applyTempoPrior(autocorr, sampleRate);
+
         // Calculate lag range for 160-190 BPM
         int minLag = (int) ((60.0f / MAX_BPM) * sampleRate / HOP_LENGTH);
         int maxLag = (int) ((60.0f / MIN_BPM) * sampleRate / HOP_LENGTH);
 
         // Make sure lags are within bounds
         minLag = Math.max(1, minLag);
-        maxLag = Math.min(autocorr.length - 1, maxLag);
+        maxLag = Math.min(weightedAutocorr.length - 1, maxLag);
 
         List<LagScore> candidates = new ArrayList<>();
 
-        // Score each candidate lag using multi-harmonic approach
+        // Score each candidate lag using multi-harmonic approach with weighted autocorr
         for (int lag = minLag; lag <= maxLag; lag++) {
             float score = 0;
             int count = 0;
 
-            // Check harmonics
+            // Check harmonics using weighted autocorrelation
             for (int i = 1; i <= MAX_HARMONICS; i++) {
                 int harmonicLag = i * lag;
-                if (harmonicLag < autocorr.length) {
-                    score += autocorr[harmonicLag];
+                if (harmonicLag < weightedAutocorr.length) {
+                    score += weightedAutocorr[harmonicLag];
                     count++;
                 }
             }
@@ -712,26 +715,26 @@ public class SimpleBPMDetector {
             int halfLag = bestLag / 2;
 
             if (doubleTempo >= MIN_BPM && doubleTempo <= MAX_BPM && halfLag >= minLag) {
-                // Calculate score at half lag
+                // Calculate score at half lag using weighted autocorr
                 float scoreHalf = 0;
                 int countHalf = 0;
                 for (int i = 1; i <= MAX_HARMONICS; i++) {
                     int harmonicLag = i * halfLag;
-                    if (harmonicLag < autocorr.length) {
-                        scoreHalf += autocorr[harmonicLag];
+                    if (harmonicLag < weightedAutocorr.length) {
+                        scoreHalf += weightedAutocorr[harmonicLag];
                         countHalf++;
                     }
                 }
                 if (countHalf > 0)
                     scoreHalf /= countHalf;
 
-                // Calculate score at original lag
+                // Calculate score at original lag using weighted autocorr
                 float scoreOriginal = 0;
                 int countOriginal = 0;
                 for (int i = 1; i <= MAX_HARMONICS; i++) {
                     int harmonicLag = i * originalLag;
-                    if (harmonicLag < autocorr.length) {
-                        scoreOriginal += autocorr[harmonicLag];
+                    if (harmonicLag < weightedAutocorr.length) {
+                        scoreOriginal += weightedAutocorr[harmonicLag];
                         countOriginal++;
                     }
                 }
@@ -753,26 +756,26 @@ public class SimpleBPMDetector {
 
             // Check if half_tempo is in 90-95 range
             if (halfTempo >= 90 && halfTempo <= 95 && doubleLag <= maxLag) {
-                // Calculate score at double lag
+                // Calculate score at double lag using weighted autocorr
                 float scoreDouble = 0;
                 int countDouble = 0;
                 for (int i = 1; i <= Math.min(4, MAX_HARMONICS); i++) {
                     int harmonicLag = i * doubleLag;
-                    if (harmonicLag < autocorr.length) {
-                        scoreDouble += autocorr[harmonicLag];
+                    if (harmonicLag < weightedAutocorr.length) {
+                        scoreDouble += weightedAutocorr[harmonicLag];
                         countDouble++;
                     }
                 }
                 if (countDouble > 0)
                     scoreDouble /= countDouble;
 
-                // Calculate score at original lag
+                // Calculate score at original lag using weighted autocorr
                 float scoreOriginal = 0;
                 int countOriginal = 0;
                 for (int i = 1; i <= Math.min(4, MAX_HARMONICS); i++) {
                     int harmonicLag = i * originalLag;
-                    if (harmonicLag < autocorr.length) {
-                        scoreOriginal += autocorr[harmonicLag];
+                    if (harmonicLag < weightedAutocorr.length) {
+                        scoreOriginal += weightedAutocorr[harmonicLag];
                         countOriginal++;
                     }
                 }
@@ -793,6 +796,36 @@ public class SimpleBPMDetector {
         tempo = Math.max(MIN_BPM, Math.min(MAX_BPM, tempo));
 
         return tempo;
+    }
+
+
+    /**
+     * Apply a tempo prior distribution to favor D&B tempo range.
+     * Uses log-normal distribution centered at 175 BPM to reduce octave errors.
+     * 
+     * @param autocorr The autocorrelation array
+     * @param sampleRate The sample rate in Hz
+     * @return Weighted autocorrelation array
+     */
+    private float[] applyTempoPrior(float[] autocorr, int sampleRate) {
+        float[] weighted = new float[autocorr.length];
+        float priorCenter = 175.0f;  // D&B center tempo
+        float sigma = 0.3f;  // Narrow distribution for D&B specificity
+
+        for (int lag = 1; lag < autocorr.length; lag++) {
+            float bpm = 60.0f / (lag * HOP_LENGTH / (float) sampleRate);
+
+            // Log-normal prior centered at 175 BPM
+            float logRatio = (float) (Math.log(bpm / priorCenter) / Math.log(2));
+            float weight = (float) Math.exp(-0.5 * (logRatio * logRatio) / (sigma * sigma));
+
+            weighted[lag] = autocorr[lag] * weight;
+        }
+        
+        // Copy the first element unchanged (lag=0)
+        weighted[0] = autocorr[0];
+        
+        return weighted;
     }
 
     /**

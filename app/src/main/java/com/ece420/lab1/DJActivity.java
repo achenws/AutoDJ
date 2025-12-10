@@ -615,24 +615,27 @@ public class DJActivity extends Activity {
                         ", Out: " + track2ForMix.getCueOutSample());
 
                 // Use the Track-based mix method which uses cue points
-                String outputPath = audioMixer.mix(
+                AudioMixer.MixResult mixResult = audioMixer.mix(
                         track1ForMix,
                         track2ForMix,
                         transitionType,
                         getCacheDir());
 
+                // Capture track1 duration for marker calculation (computed on background thread!)
+                final long track1DurationMs = mixResult.track1DurationMs;
+
                 mainHandler.post(() -> {
-                    if (outputPath != null) {
+                    if (mixResult.outputPath != null) {
                         tvMixStatus.setText("Mix complete! Tap to play.");
 
                         // Create a Track for the mixed result
                         float avgBpm = (track1ForMix.getBpm() + track2ForMix.getBpm()) / 2;
                         // Extract filename from output path for display
-                        String mixedName = new File(outputPath).getName();
+                        String mixedName = new File(mixResult.outputPath).getName();
                         if (mixedName.endsWith(".wav")) {
                             mixedName = mixedName.substring(0, mixedName.length() - 4);
                         }
-                        Track mixedTrack = new Track(mixedName, outputPath, avgBpm);
+                        Track mixedTrack = new Track(mixedName, mixResult.outputPath, avgBpm);
                         mixedTrack.setMixed(true);
 
                         // Add to track list (hide BPM for mixes)
@@ -646,12 +649,12 @@ public class DJActivity extends Activity {
                         tvBPMValue.setText(""); // Hide BPM for mix
 
                         try {
-                            audioPlayerManager.loadTrack(outputPath);
+                            audioPlayerManager.loadTrack(mixResult.outputPath);
                             btnPlay.setEnabled(true);
                             btnStop.setEnabled(true);
 
                             // Extract and display waveform for mixed track with callback for markers
-                            displayWaveform(new File(outputPath), () -> {
+                            displayWaveform(new File(mixResult.outputPath), () -> {
                                 // Calculate marker position based on transition type
                                 float startMarkerNorm = -1;
                                 float endMarkerNorm = -1;
@@ -679,23 +682,19 @@ public class DJActivity extends Activity {
 
                                     } else {
                                         // Simple Fade / Overlap uses Original tracks
-                                        // Note: For Original tracks, setTotalSamples in displayWaveform sets it as (ms
-                                        // * 44.1)
-                                        // effectively Mono samples/frames.
+                                        // Use track1DurationMs from MixResult (computed on background thread - FAST!)
+                                        if (track1DurationMs > 0) {
+                                            // Markers: track2 starts at 80% of track1, track1 ends at 100%
+                                            startMs = (long) (track1DurationMs * 0.8f);
+                                            endMs = track1DurationMs;
 
-                                        // We can reconstruct duration from totalSamples
-                                        long track1TotalFrames = track1ForMix.getTotalSamples();
-                                        long track1DurationMs = (long) (track1TotalFrames / 44.1f);
-
-                                        // Fallback if totalSamples looks wrong (too small), use approximated duration
-                                        // But logic requires totalSamples for ratio.
-                                        // Logic: Start at 80% of Track 1, End at 100% of Track 1
-
-                                        startMs = (long) (track1DurationMs * 0.8f);
-                                        endMs = track1DurationMs;
-
-                                        Log.d(TAG, "Simple/Overlap Markers (Time): Duration=" + track1DurationMs +
-                                                "ms, Start=" + startMs + "ms, End=" + endMs + "ms");
+                                            Log.d(TAG, "Simple/Overlap Markers: T1 duration=" + track1DurationMs +
+                                                    "ms, Start=" + startMs + "ms, End=" + endMs + "ms");
+                                        } else {
+                                            Log.e(TAG, "track1DurationMs not available from mixer");
+                                            startMs = 0;
+                                            endMs = 0;
+                                        }
                                     }
 
                                     startMarkerNorm = (float) startMs / totalMixDurationMs;
@@ -802,8 +801,9 @@ public class DJActivity extends Activity {
                 }
 
                 // Detect cue points using accurate onset-based detection
+                // Skip for mixed tracks - they use pre-computed markers from track1DurationMs
                 long durationMs = audioPlayerManager.getDuration();
-                if (currentTrack != null && currentTrack.getBpm() > 0 && durationMs > 0) {
+                if (currentTrack != null && currentTrack.getBpm() > 0 && durationMs > 0 && !currentTrack.isMixed()) {
                     try {
                         // Load full audio for accurate cue detection
                         AudioChunkReader cueReader = new AudioChunkReader(audioFile.getAbsolutePath());

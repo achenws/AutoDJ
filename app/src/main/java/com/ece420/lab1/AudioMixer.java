@@ -28,6 +28,17 @@ public class AudioMixer {
     // Fallback duration when BPM unknown (48 bars at 175 BPM)
     private static final float FALLBACK_FADE_SECONDS = 48 * 4 * 60.0f / 175.0f; // ~65.8 seconds
 
+    // Result class to return both output path and track1 duration for marker calculation
+    public static class MixResult {
+        public final String outputPath;
+        public final long track1DurationMs;
+
+        public MixResult(String outputPath, long track1DurationMs) {
+            this.outputPath = outputPath;
+            this.track1DurationMs = track1DurationMs;
+        }
+    }
+
     private SimpleBPMDetector bpmDetector;
     private SOLATimeStretcher timeStretcher;
     private EQCrossfader crossfader;
@@ -93,8 +104,8 @@ public class AudioMixer {
         return file.getName();
     }
 
-    // Mix two tracks with the specified transition type, returns output path
-    public String mix(String track1Path, String track2Path, int transitionType, File outputDir) {
+    // Mix two tracks with the specified transition type, returns MixResult with output path and track1 duration
+    public MixResult mix(String track1Path, String track2Path, int transitionType, File outputDir) {
         Log.d(TAG, "Starting mix: " + track1Path + " -> " + track2Path);
         Log.d(TAG, "Transition type: " + transitionType);
 
@@ -105,12 +116,12 @@ public class AudioMixer {
             return mixOverlapStreaming(track1Path, track2Path, outputDir);
         }
 
-        // DJ mode uses optimized fade-region-only processing
-        return mixDJOptimized(track1Path, track2Path, 0, 0, outputDir);
+        // DJ mode uses optimized fade-region-only processing (track1DurationMs=0, uses cue points)
+        return new MixResult(mixDJOptimized(track1Path, track2Path, 0, 0, outputDir), 0);
     }
 
     // Mix two tracks using detected cue points
-    public String mix(Track track1, Track track2, int transitionType, File outputDir) {
+    public MixResult mix(Track track1, Track track2, int transitionType, File outputDir) {
         Log.d(TAG, "Starting mix with cue points: " + track1.getName() + " -> " + track2.getName());
         Log.d(TAG, "Transition type: " + transitionType);
         Log.d(TAG, "Cue points: track1 out=" + track1.getCueOutSample() +
@@ -125,16 +136,16 @@ public class AudioMixer {
             return mixOverlapStreaming(track1.getFilePath(), track2.getFilePath(), outputDir);
         }
 
-        // DJ mode: use preprocessed files if available
+        // DJ mode: use preprocessed files if available (track1DurationMs=0, uses cue points)
         if (track1.isPreprocessed() && track2.isPreprocessed()) {
             Log.d(TAG, "Using preprocessed files at 175 BPM");
-            return mixDJWithPreprocessed(track1, track2, outputDir);
+            return new MixResult(mixDJWithPreprocessed(track1, track2, outputDir), 0);
         }
 
         // Fallback to runtime time stretching
         Log.w(TAG, "Tracks not preprocessed, using runtime stretching");
-        return mixDJOptimized(track1.getFilePath(), track2.getFilePath(),
-                track1.getCueOutSample(), track2.getCueInSample(), outputDir);
+        return new MixResult(mixDJOptimized(track1.getFilePath(), track2.getFilePath(),
+                track1.getCueOutSample(), track2.getCueInSample(), outputDir), 0);
     }
 
     // DJ transition using preprocessed files (already at 175 BPM)
@@ -518,9 +529,6 @@ public class AudioMixer {
             float[] stretched2 = timeStretcher.stretch(track2FadeRegion, stretch2);
             track2FadeRegion = null; // Allow GC
 
-            // Clear FFT cache to free memory
-            DSPUtils.clearFFTCache();
-
             Log.d(TAG, "Stretched: Track1=" + stretched1.length + ", Track2=" + stretched2.length);
 
             // Extract crossfade segments and perform EQ crossfade
@@ -743,12 +751,13 @@ public class AudioMixer {
     }
 
     // Streaming simple fade mix
-    private String mixSimpleFadeStreaming(String track1Path, String track2Path, File outputDir) {
+    private MixResult mixSimpleFadeStreaming(String track1Path, String track2Path, File outputDir) {
         Log.d(TAG, "Simple Fade Mix (Streaming)");
 
         AudioChunkReader reader1 = null;
         AudioChunkReader reader2 = null;
         StreamingWavWriter writer = null;
+        long track1DurationMs = 0;  // Will be computed for marker calculation
 
         try {
             // Open readers
@@ -761,6 +770,9 @@ public class AudioMixer {
             Log.d(TAG, "Source: " + actualSampleRate + " Hz, " + actualChannels + " channels");
 
             long track1Samples = reader1.getTotalSamples();
+            // Calculate track1 duration in ms for marker display (computed on background thread!)
+            track1DurationMs = track1Samples * 1000 / (actualSampleRate * actualChannels);
+            Log.d(TAG, "Track1 duration: " + track1DurationMs + "ms (for markers)");
 
             // Calculate transition point at 80% of track 1
             long transitionPoint = (long) (track1Samples * 0.8f);
@@ -860,11 +872,11 @@ public class AudioMixer {
             writer = null;
 
             Log.d(TAG, "Streaming mix complete: " + outputPath);
-            return outputPath;
+            return new MixResult(outputPath, track1DurationMs);
 
         } catch (Exception e) {
             Log.e(TAG, "Error during streaming mix", e);
-            return null;
+            return new MixResult(null, 0);
         } finally {
             try {
                 if (reader1 != null)
@@ -889,12 +901,13 @@ public class AudioMixer {
      * True overlap: plays all of track 1, starts track 2 before track 1 ends,
      * both play together during overlap, then track 2 continues.
      */
-    private String mixOverlapStreaming(String track1Path, String track2Path, File outputDir) {
+    private MixResult mixOverlapStreaming(String track1Path, String track2Path, File outputDir) {
         Log.d(TAG, "Overlap Mix (Streaming)");
 
         AudioChunkReader reader1 = null;
         AudioChunkReader reader2 = null;
         StreamingWavWriter writer = null;
+        long track1DurationMs = 0;  // Will be computed for marker calculation
 
         try {
             // Open readers
@@ -907,6 +920,9 @@ public class AudioMixer {
             Log.d(TAG, "Source: " + actualSampleRate + " Hz, " + actualChannels + " channels");
 
             long track1Samples = reader1.getTotalSamples();
+            // Calculate track1 duration in ms for marker display (computed on background thread!)
+            track1DurationMs = track1Samples * 1000 / (actualSampleRate * actualChannels);
+            Log.d(TAG, "Track1 duration: " + track1DurationMs + "ms (for markers)");
             // Calculate overlap start at 80% of track 1
             long overlapStart = (long) (track1Samples * 0.8f);
 
@@ -995,11 +1011,11 @@ public class AudioMixer {
             writer = null;
 
             Log.d(TAG, "Streaming mix complete: " + outputPath);
-            return outputPath;
+            return new MixResult(outputPath, track1DurationMs);
 
         } catch (Exception e) {
             Log.e(TAG, "Error during streaming mix", e);
-            return null;
+            return new MixResult(null, 0);
         } finally {
             try {
                 if (reader1 != null)
