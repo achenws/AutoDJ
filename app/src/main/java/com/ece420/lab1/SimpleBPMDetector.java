@@ -340,9 +340,9 @@ public class SimpleBPMDetector {
             float meanEnergy = totalEnergy / numBars;
             Log.d(TAG, "Mean bar energy: " + meanEnergy);
 
-            // Find cue-in point (low energy bar, ~30-45s into track)
+            // Find cue-in point (first low energy bar after 30s, up to 50% of track)
             int startSearchBar = Math.max(1, (int) (30.0f / barDurationSec));
-            int endCueInSearch = Math.min((int) (45.0f / barDurationSec), numBars / 3);
+            int endCueInSearch = numBars / 2;  // Search up to halfway through track
 
             long cueInSample = 0; // Default to 0 at analysis rate
             boolean foundCueIn = false;
