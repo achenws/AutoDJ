@@ -8,7 +8,6 @@ import java.io.IOException;
 public class AudioPlayerManager {
     private static final String TAG = "AudioPlayerManager";
     private MediaPlayer mediaPlayer;
-    private String currentPath;
 
     public AudioPlayerManager() {
         mediaPlayer = new MediaPlayer();
@@ -19,7 +18,6 @@ public class AudioPlayerManager {
             mediaPlayer.reset();
             mediaPlayer.setDataSource(path);
             mediaPlayer.prepare();
-            currentPath = path;
         } catch (IOException e) {
             Log.e(TAG, "Error loading track: " + path, e);
             throw e;

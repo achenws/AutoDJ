@@ -8,8 +8,6 @@ android {
         applicationId 'com.ece420.lab1'
         minSdk 28
         targetSdk 29    // Android 10
-//        targetSdk 33    //Android 13
-//        targetSdk 34    //Android 14
         versionCode 1
         versionName "1.0"
     }
@@ -31,10 +29,6 @@ dependencies {
 
     // Audio processing - FFT library for manual DSP implementation
     implementation 'com.github.wendykierp:JTransforms:3.1'
-
-    // UI components
-    implementation 'androidx.recyclerview:recyclerview:1.2.1'
-    implementation 'com.jjoe64:graphview:4.2.1'  // For waveform visualization
 
     // JSON for simple data persistence
     implementation 'com.google.code.gson:gson:2.10.1'

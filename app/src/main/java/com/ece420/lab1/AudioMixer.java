@@ -104,22 +104,6 @@ public class AudioMixer {
         return file.getName();
     }
 
-    // Mix two tracks with the specified transition type, returns MixResult with output path and track1 duration
-    public MixResult mix(String track1Path, String track2Path, int transitionType, File outputDir) {
-        Log.d(TAG, "Starting mix: " + track1Path + " -> " + track2Path);
-        Log.d(TAG, "Transition type: " + transitionType);
-
-        // Use streaming for simple fade and overlap
-        if (transitionType == TRANSITION_SIMPLE_FADE) {
-            return mixSimpleFadeStreaming(track1Path, track2Path, outputDir);
-        } else if (transitionType == TRANSITION_OVERLAP) {
-            return mixOverlapStreaming(track1Path, track2Path, outputDir);
-        }
-
-        // DJ mode uses optimized fade-region-only processing (track1DurationMs=0, uses cue points)
-        return new MixResult(mixDJOptimized(track1Path, track2Path, 0, 0, outputDir), 0);
-    }
-
     // Mix two tracks using detected cue points
     public MixResult mix(Track track1, Track track2, int transitionType, File outputDir) {
         Log.d(TAG, "Starting mix with cue points: " + track1.getName() + " -> " + track2.getName());
