@@ -91,9 +91,6 @@ public class AudioChunkReader implements Closeable {
             decoder.configure(format, null, null, 0);
             decoder.start();
 
-            Log.d(TAG, "Opened: " + filePath + " (" + sampleRate + "Hz, " +
-                    channelCount + "ch, " + String.format("%.1f", durationUs / 1_000_000.0) + "s)");
-
         } catch (Exception e) {
             close();
             throw new IOException("Failed to open audio file: " + filePath, e);
@@ -292,13 +289,6 @@ public class AudioChunkReader implements Closeable {
     }
 
     /**
-     * Get number of samples read so far.
-     */
-    public long getSamplesRead() {
-        return samplesRead;
-    }
-
-    /**
      * Get total estimated samples in file.
      */
     public long getTotalSamples() {
@@ -317,13 +307,6 @@ public class AudioChunkReader implements Closeable {
      */
     public int getChannelCount() {
         return channelCount;
-    }
-
-    /**
-     * Get duration in microseconds.
-     */
-    public long getDurationUs() {
-        return durationUs;
     }
 
     /**
@@ -349,7 +332,5 @@ public class AudioChunkReader implements Closeable {
             extractor.release();
             extractor = null;
         }
-
-        Log.d(TAG, "Closed AudioChunkReader (" + samplesRead + " samples read)");
     }
 }

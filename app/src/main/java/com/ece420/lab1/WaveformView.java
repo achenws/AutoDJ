@@ -143,7 +143,6 @@ public class WaveformView extends View {
      */
     public void setWaveformData(float[] data) {
         this.waveformData = data;
-        android.util.Log.d(TAG, "setWaveformData called with " + (data != null ? data.length : 0) + " points");
         invalidate();  // Trigger redraw
     }
 
@@ -173,7 +172,6 @@ public class WaveformView extends View {
 
         // If no data, show message
         if (waveformData == null || waveformData.length == 0) {
-            android.util.Log.d(TAG, "onDraw: No waveform data to display");
             // Draw placeholder text
             Paint textPaint = new Paint();
             textPaint.setColor(0xFFFFFFFF);
@@ -182,8 +180,6 @@ public class WaveformView extends View {
             canvas.drawText("No waveform loaded", getWidth() / 2.0f, getHeight() / 2.0f, textPaint);
             return;
         }
-
-        android.util.Log.d(TAG, "onDraw: Drawing waveform with " + waveformData.length + " points");
 
         float width = getWidth();
         float height = getHeight();

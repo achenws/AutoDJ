@@ -24,25 +24,8 @@ public class EQCrossfader {
 
     private int sampleRate;
 
-    public EQCrossfader() {
-        this(DEFAULT_SAMPLE_RATE);
-    }
-
     public EQCrossfader(int sampleRate) {
         this.sampleRate = sampleRate;
-    }
-
-    // Calculate RMS of audio buffer
-    public float calculateRMS(float[] audio) {
-        if (audio == null || audio.length == 0) {
-            return 0.0f;
-        }
-
-        double sumSquares = 0.0;
-        for (float sample : audio) {
-            sumSquares += sample * sample;
-        }
-        return (float) Math.sqrt(sumSquares / audio.length);
     }
 
     // Find peak amplitude in audio buffer
@@ -80,9 +63,6 @@ public class EQCrossfader {
         for (int i = 0; i < track2.length; i++) {
             track2[i] *= gain;
         }
-
-        Log.d(TAG, String.format("Peak level matching: track1=%.4f, track2=%.4f -> gain=%.2fx",
-                peak1, peak2, gain));
 
         return gain;
     }
@@ -213,30 +193,6 @@ public class EQCrossfader {
         return output;
     }
 
-    // Simple overlap mix (both tracks at same time)
-    public float[] simpleOverlap(float[] outgoing, float[] incoming, int overlapDurationSamples) {
-        int overlapLen = Math.min(overlapDurationSamples,
-                Math.min(outgoing.length, incoming.length));
-
-        float[] mixed = new float[overlapLen];
-        for (int i = 0; i < overlapLen; i++) {
-            // Both tracks at equal volume
-            mixed[i] = (outgoing[i] + incoming[i]) * 0.5f;  // Attenuate to prevent clipping
-        }
-
-        // Append rest of incoming track
-        float[] output;
-        if (incoming.length > overlapLen) {
-            output = new float[overlapLen + (incoming.length - overlapLen)];
-            System.arraycopy(mixed, 0, output, 0, overlapLen);
-            System.arraycopy(incoming, overlapLen, output, overlapLen, incoming.length - overlapLen);
-        } else {
-            output = mixed;
-        }
-
-        return output;
-    }
-
     // Calculate fade duration from bars and BPM
     public int calculateFadeDuration(int bars, float bpm, int beatsPerBar) {
         float beats = bars * beatsPerBar;
@@ -262,9 +218,5 @@ public class EQCrossfader {
             }
         }
 
-        if (clippedCount > 0) {
-            Log.d(TAG, String.format("Peak limiter: clipped %d samples (%.2f%%)",
-                    clippedCount, 100.0f * clippedCount / audio.length));
-        }
     }
 }

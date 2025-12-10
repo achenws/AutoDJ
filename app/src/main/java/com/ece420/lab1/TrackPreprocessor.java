@@ -63,9 +63,6 @@ public class TrackPreprocessor {
         // Calculate stretch factor
         float stretchFactor = originalBpm / TARGET_BPM;
 
-        Log.d(TAG, String.format("Starting preprocessing: %s (%.1f BPM -> %.1f BPM, factor=%.3f)",
-                inputPath, originalBpm, TARGET_BPM, stretchFactor));
-
         // Generate output path in app files directory
         File inputFile = new File(inputPath);
         String baseName = inputFile.getName().replaceFirst("[.][^.]+$", "");
@@ -75,7 +72,6 @@ public class TrackPreprocessor {
 
         // Skip if no stretching needed
         if (Math.abs(stretchFactor - 1.0f) < 0.01f) {
-            Log.d(TAG, "No stretching needed (factor ~1.0), copying original");
             return decodeToWav(inputPath, outputPath, callback);
         }
 
@@ -93,9 +89,6 @@ public class TrackPreprocessor {
             int inputSampleRate = reader.getSampleRate();
             int channels = reader.getChannelCount();
             long totalSamples = reader.getTotalSamples();
-
-            Log.d(TAG, String.format("Input: %dHz, %dch, %d samples (%.1fs)",
-                    inputSampleRate, channels, totalSamples, reader.getDurationSeconds()));
 
             // Estimate mono sample count for allocation
             long monoSamples = (channels == 2) ? totalSamples / 2 : totalSamples;
@@ -142,9 +135,6 @@ public class TrackPreprocessor {
             System.arraycopy(allAudio, 0, audio, 0, totalRead);
             allAudio = null; // Free memory
 
-            Log.d(TAG, String.format("Loaded %d samples (%.1f MB)",
-                    audio.length, audio.length * 4.0 / (1024 * 1024)));
-
             // Phase 2: Apply SOLA time stretching to entire audio
             if (callback != null) {
                 callback.onStatusUpdate("Stretching audio...");
@@ -154,9 +144,6 @@ public class TrackPreprocessor {
             SOLATimeStretcher stretcher = new SOLATimeStretcher();
             float[] stretched = stretcher.stretch(audio, stretchFactor);
             audio = null; // Free memory
-
-            Log.d(TAG, String.format("Stretched: %d samples -> %d samples (ratio=%.3f)",
-                    totalRead, stretched.length, (float) stretched.length / totalRead));
 
             if (callback != null) {
                 callback.onProgress(0.7f);
@@ -176,7 +163,6 @@ public class TrackPreprocessor {
 
                 SimpleBPMDetector.BeatGrid beatGrid = bpmDetector.detectBeatGrid(phaseAudio, SAMPLE_RATE);
                 phase = beatGrid.phase;
-                Log.d(TAG, String.format("Beat phase detected: %.3fs (BPM check: %.1f)", phase, beatGrid.bpm));
             } catch (Exception e) {
                 Log.w(TAG, "Phase detection failed, using 0", e);
                 phase = 0.0f;
@@ -202,8 +188,6 @@ public class TrackPreprocessor {
             }
 
             long durationMs = System.currentTimeMillis() - startTime;
-            Log.d(TAG, String.format("Preprocessing complete: %s (%.1f seconds, phase=%.3fs)",
-                    outputPath, durationMs / 1000.0, phase));
 
             return PreprocessResult.success(outputPath, originalBpm, TARGET_BPM, durationMs, phase);
 
@@ -280,7 +264,6 @@ public class TrackPreprocessor {
                 SimpleBPMDetector bpmDetector = new SimpleBPMDetector();
                 SimpleBPMDetector.BeatGrid beatGrid = bpmDetector.detectBeatGrid(phaseAudio, SAMPLE_RATE);
                 phase = beatGrid.phase;
-                Log.d(TAG, String.format("Beat phase detected: %.3fs", phase));
             } catch (Exception e) {
                 Log.w(TAG, "Phase detection failed, using 0", e);
             }

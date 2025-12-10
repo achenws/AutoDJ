@@ -70,20 +70,6 @@ public class Track {
         return cueOutSample > 0;
     }
 
-    // Get cue-out position normalized (0.0 to 1.0), returns -1 if not set
-    public float getCueOutNormalized() {
-        if (cueOutSample <= 0 || totalSamples <= 0)
-            return -1;
-        return (float) cueOutSample / totalSamples;
-    }
-
-    // Get cue-in position normalized (0.0 to 1.0), returns -1 if not set
-    public float getCueInNormalized() {
-        if (totalSamples <= 0)
-            return -1;
-        return (float) cueInSample / totalSamples;
-    }
-
     // Get the 175 BPM stretched file path, null if not preprocessed
     public String getStretchedFilePath() {
         return stretchedFilePath;

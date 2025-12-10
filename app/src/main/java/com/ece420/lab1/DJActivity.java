@@ -49,7 +49,6 @@ public class DJActivity extends Activity {
     private Button btnPlay;
     private Button btnPause;
     private Button btnStop;
-    private TextView tvBPMLabel;
     private TextView tvBPMValue;
     private TextView tvCurrentTrack;
     private ListView lvTrackList;
@@ -125,7 +124,6 @@ public class DJActivity extends Activity {
         btnPlay = findViewById(R.id.btnPlay);
         btnPause = findViewById(R.id.btnPause);
         btnStop = findViewById(R.id.btnStop);
-        tvBPMLabel = findViewById(R.id.tvBPMLabel);
         tvBPMValue = findViewById(R.id.tvBPMValue);
         tvCurrentTrack = findViewById(R.id.tvCurrentTrack);
         lvTrackList = findViewById(R.id.lvTrackList);
@@ -293,12 +291,8 @@ public class DJActivity extends Activity {
                 File tempFile = copyUriToTempFile(uri);
 
                 if (tempFile != null) {
-                    Log.d(TAG, "Temp file created: " + tempFile.getAbsolutePath());
-
                     // Step 1: Detect BPM
-                    Log.d(TAG, "Starting BPM detection...");
                     float bpm = bpmDetector.detectBPM(tempFile.getAbsolutePath());
-                    Log.d(TAG, "BPM detection complete: " + bpm);
 
                     // Create track object with original BPM
                     Track track = new Track(fileName, tempFile.getAbsolutePath(), bpm);
@@ -342,10 +336,8 @@ public class DJActivity extends Activity {
                                     // Update track with preprocessed file path and phase
                                     track.setStretchedFilePath(result.stretchedFilePath);
                                     track.setPhase(result.phase);
-                                    Log.d(TAG, "Preprocessing complete, phase=" + result.phase);
 
                                     // Step 3: Detect cue points on the STRETCHED audio using accurate method
-                                    Log.d(TAG, "Detecting cue points on stretched audio (accurate mode)...");
                                     try {
                                         // Load all audio samples for accurate cue point detection
                                         AudioChunkReader reader = new AudioChunkReader(result.stretchedFilePath);
@@ -371,9 +363,6 @@ public class DJActivity extends Activity {
                                             pos += c.length;
                                         }
 
-                                        Log.d(TAG, String.format("Loaded %d samples for cue detection (rate=%d, ch=%d)",
-                                                audioSamples.length, sampleRate, channels));
-
                                         // Find cue points using accurate onset-based detection at 175 BPM
                                         SimpleBPMDetector.CuePoints cues = bpmDetector.findCuePoints(
                                                 audioSamples, sampleRate, 175.0f);
@@ -384,11 +373,6 @@ public class DJActivity extends Activity {
                                         track.setCueInSample(cues.cueInSample * channels);
                                         track.setCueOutSample(cues.cueOutSample * channels);
                                         track.setTotalSamples(totalSamples);
-
-                                        Log.d(TAG, String.format(
-                                                "Cue points detected (accurate) - In: %d, Out: %d, Total: %d (Channels: %d)",
-                                                track.getCueInSample(), track.getCueOutSample(), totalSamples,
-                                                channels));
                                     } catch (Exception e) {
                                         Log.w(TAG, "Cue point detection failed", e);
                                     }
@@ -608,12 +592,6 @@ public class DJActivity extends Activity {
         // Perform mixing in background
         executorService.execute(() -> {
             try {
-                Log.d(TAG, "Starting mix operation...");
-                Log.d(TAG, "Track1 cue points - In: " + track1ForMix.getCueInSample() +
-                        ", Out: " + track1ForMix.getCueOutSample());
-                Log.d(TAG, "Track2 cue points - In: " + track2ForMix.getCueInSample() +
-                        ", Out: " + track2ForMix.getCueOutSample());
-
                 // Use the Track-based mix method which uses cue points
                 AudioMixer.MixResult mixResult = audioMixer.mix(
                         track1ForMix,
@@ -677,9 +655,6 @@ public class DJActivity extends Activity {
 
                                         endMs = cueOutMs;
                                         startMs = Math.max(0, endMs - fadeMs);
-
-                                        Log.d(TAG, "DJ Markers (Time): End=" + endMs + "ms, Start=" + startMs + "ms");
-
                                     } else {
                                         // Simple Fade / Overlap uses Original tracks
                                         // Use track1DurationMs from MixResult (computed on background thread - FAST!)
@@ -687,11 +662,7 @@ public class DJActivity extends Activity {
                                             // Markers: track2 starts at 80% of track1, track1 ends at 100%
                                             startMs = (long) (track1DurationMs * 0.8f);
                                             endMs = track1DurationMs;
-
-                                            Log.d(TAG, "Simple/Overlap Markers: T1 duration=" + track1DurationMs +
-                                                    "ms, Start=" + startMs + "ms, End=" + endMs + "ms");
                                         } else {
-                                            Log.e(TAG, "track1DurationMs not available from mixer");
                                             startMs = 0;
                                             endMs = 0;
                                         }
@@ -715,8 +686,6 @@ public class DJActivity extends Activity {
                                     mixedTrack.setDisplayMarkers(startMarkerNorm, endMarkerNorm);
 
                                     waveformView.setCueMarkers(startMarkerNorm, endMarkerNorm);
-                                    Log.d(TAG, "Cue markers set after mix: start=" + startMarkerNorm + ", end="
-                                            + endMarkerNorm);
                                 }
                             });
 
@@ -772,8 +741,6 @@ public class DJActivity extends Activity {
     }
 
     private void displayWaveform(File audioFile, Runnable onComplete) {
-        Log.d(TAG, "displayWaveform called for file: " + audioFile.getAbsolutePath());
-
         // Show loading indicator on UI thread
         mainHandler.post(() -> {
             Toast.makeText(this, "Extracting waveform...", Toast.LENGTH_SHORT).show();
@@ -782,15 +749,10 @@ public class DJActivity extends Activity {
         // Extract real waveform from decoded audio
         executorService.execute(() -> {
             try {
-                Log.d(TAG, "Starting waveform extraction...");
-
                 // Extract waveform with target of 1500 points for good visualization
                 float[] waveformData = WaveformExtractor.extractWaveform(
                         audioFile.getAbsolutePath(),
                         1500);
-
-                Log.d(TAG, "Waveform extraction completed. Data: "
-                        + (waveformData != null ? waveformData.length + " points" : "null"));
 
                 if (waveformData == null || waveformData.length == 0) {
                     Log.e(TAG, "Failed to extract waveform");
@@ -830,7 +792,6 @@ public class DJActivity extends Activity {
                         currentTrack.setCueInSample(cues.cueInSample * channels);
                         currentTrack.setCueOutSample(cues.cueOutSample * channels);
                         currentTrack.setTotalSamples((long) (durationMs * 44.1f));
-                        Log.d(TAG, "Accurate cue points detected - In: " + cues.cueInSample + ", Out: " + cues.cueOutSample);
                     } catch (Exception e) {
                         Log.w(TAG, "Cue point detection failed", e);
                     }
@@ -839,7 +800,6 @@ public class DJActivity extends Activity {
                 // Update waveform view on UI thread
                 mainHandler.post(() -> {
                     waveformView.setWaveformData(waveformData);
-                    Log.d(TAG, "Waveform displayed with " + waveformData.length + " points");
 
                     // Clear cue markers when loading a track
                     waveformView.clearMarkers();

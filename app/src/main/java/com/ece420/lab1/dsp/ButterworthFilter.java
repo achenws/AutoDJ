@@ -141,22 +141,4 @@ public class ButterworthFilter {
             samples[i] = processSample(samples[i]);
         }
     }
-
-    /**
-     * Get the current cutoff frequency.
-     *
-     * @return Cutoff frequency in Hz
-     */
-    public double getCutoffHz() {
-        return cutoffHz;
-    }
-
-    /**
-     * Get the filter type.
-     *
-     * @return HIGH_PASS or LOW_PASS
-     */
-    public FilterType getType() {
-        return type;
-    }
 }

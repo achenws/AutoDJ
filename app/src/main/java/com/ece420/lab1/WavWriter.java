@@ -40,10 +40,6 @@ public class WavWriter {
             // Write PCM data
             fos.write(pcmData);
 
-            Log.d(TAG, "WAV file written: " + outputPath +
-                    " (" + samples.length + " samples, " +
-                    String.format("%.1f", (float) samples.length / sampleRate) + " seconds)");
-
             return true;
         } catch (IOException e) {
             Log.e(TAG, "Error writing WAV file", e);
@@ -168,7 +164,6 @@ class StreamingWavWriter implements Closeable {
         raf.write(header);
 
         totalSamplesWritten = 0;
-        Log.d(TAG, "Opened streaming WAV: " + outputPath + " (" + sampleRate + "Hz, " + numChannels + "ch)");
     }
 
     /**
@@ -264,9 +259,6 @@ class StreamingWavWriter implements Closeable {
             // Seek to data size field (offset 40)
             raf.seek(40);
             writeIntLE(pcmDataLength);
-
-            Log.d(TAG, "Closed streaming WAV: " + totalSamplesWritten + " samples (" +
-                    String.format("%.1f", (float) totalSamplesWritten / sampleRate) + " seconds)");
         } finally {
             raf.close();
             raf = null;

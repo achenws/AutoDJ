@@ -1,11 +1,7 @@
 package com.ece420.lab1.dsp;
 
-import android.util.Log;
-
 // SOLA time stretching - changes tempo without affecting pitch
 public class SOLATimeStretcher {
-
-    private static final String TAG = "SOLATimeStretcher";
 
     // SOLA parameters
     private static final int FRAME_LENGTH = 2048;
@@ -24,13 +20,6 @@ public class SOLATimeStretcher {
         this.overlapLen = frameLength - hopOutput; // 1024
     }
 
-    public SOLATimeStretcher(int frameLength, float overlapRatio) {
-        this.frameLength = frameLength;
-        this.hopOutput = (int) (frameLength * overlapRatio);
-        this.searchRange = (int) (frameLength * SEARCH_RATIO);
-        this.overlapLen = frameLength - hopOutput;
-    }
-
     // Time-stretch audio by given factor (>1 = slower, <1 = faster)
     public float[] stretch(float[] input, float stretchFactor) {
         // Skip if no stretching needed
@@ -41,9 +30,6 @@ public class SOLATimeStretcher {
         // Calculate input hop (how much we advance in input per frame)
         // Use float for precise drift-free calculation
         float hopInputFloat = hopOutput / stretchFactor;
-
-        Log.d(TAG, String.format("SOLA stretch: factor=%.3f, hopOutput=%d, hopInput=%.3f, overlapLen=%d",
-                stretchFactor, hopOutput, hopInputFloat, overlapLen));
 
         // Dynamically grow output buffer as needed
         // Estimate output size
@@ -126,9 +112,6 @@ public class SOLATimeStretcher {
             frameCount++;
         }
 
-        Log.d(TAG, String.format("SOLA complete: %d frames, input=%d -> output=%d (ratio=%.3f)",
-                frameCount, input.length, outputLen, (float) outputLen / input.length));
-
         // Trim to actual size
         float[] result = new float[outputLen];
         System.arraycopy(output, 0, result, 0, outputLen);
@@ -155,13 +138,5 @@ public class SOLATimeStretcher {
         normB = (float) Math.sqrt(normB);
 
         return dot / (normA * normB + 1e-10f);
-    }
-
-    public int getFrameLength() {
-        return frameLength;
-    }
-
-    public float getOverlapRatio() {
-        return OVERLAP_RATIO;
     }
 }

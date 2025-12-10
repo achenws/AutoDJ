@@ -22,11 +22,8 @@ public class WaveformExtractor {
      * @return Array of normalized amplitude values (-1.0 to 1.0), or null on error
      */
     public static float[] extractWaveform(String filePath, int targetPoints) {
-        Log.d(TAG, "extractWaveform called for: " + filePath);
-
         try {
             // Step 1: Decode the entire audio file to PCM samples
-            Log.d(TAG, "Starting audio decode...");
             float[] allSamples = decodeAudioFile(filePath);
 
             if (allSamples == null) {
@@ -39,11 +36,8 @@ public class WaveformExtractor {
                 return null;
             }
 
-            Log.d(TAG, "Successfully decoded " + allSamples.length + " samples, downsampling to " + targetPoints + " points");
-
             // Step 2: Downsample to target number of points for visualization
             float[] result = downsampleForVisualization(allSamples, targetPoints);
-            Log.d(TAG, "Downsampling complete. Result length: " + (result != null ? result.length : "null"));
             return result;
 
         } catch (Exception e) {
@@ -58,7 +52,6 @@ public class WaveformExtractor {
      * Sample ~500 positions across the track for instant waveform preview
      */
     private static float[] decodeAudioFile(String filePath) {
-        Log.d(TAG, "decodeAudioFile: Starting ultra-fast decode for " + filePath);
         MediaExtractor extractor = new MediaExtractor();
         MediaCodec decoder = null;
 
@@ -90,8 +83,6 @@ public class WaveformExtractor {
 
             // Get track duration
             long durationUs = format.getLong(MediaFormat.KEY_DURATION);
-            int durationSec = (int) (durationUs / 1000000);
-            Log.d(TAG, "Track duration: " + durationSec + " seconds, sampling " + TARGET_SAMPLES + " points");
 
             // Create decoder
             decoder = MediaCodec.createDecoderByType(mime);
@@ -160,14 +151,7 @@ public class WaveformExtractor {
                 }
 
                 peakSamples.add(maxPeak);
-
-                // Log progress every 100 samples
-                if (sampleIdx % 100 == 0 && sampleIdx > 0) {
-                    Log.d(TAG, "Sampled " + sampleIdx + "/" + TARGET_SAMPLES + " positions");
-                }
             }
-
-            Log.d(TAG, "Sampled " + peakSamples.size() + " positions across track");
 
         } catch (IOException e) {
             Log.e(TAG, "IOException while decoding audio: " + e.getMessage(), e);
@@ -195,7 +179,6 @@ public class WaveformExtractor {
             samples[i] = peakSamples.get(i);
         }
 
-        Log.d(TAG, "Ultra-fast decode complete: " + samples.length + " peak samples");
         return samples;
     }
 
