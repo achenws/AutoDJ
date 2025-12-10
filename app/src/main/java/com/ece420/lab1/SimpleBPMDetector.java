@@ -348,16 +348,13 @@ public class SimpleBPMDetector {
             boolean foundCueIn = false;
 
             for (int bar = startSearchBar; bar < endCueInSearch; bar++) {
-                // Look for low energy bar
+                // Look for first low energy bar (E < 0.7 × mean)
                 if (barEnergies[bar] < 0.7f * meanEnergy) {
-                    // Also check next bar to avoid transient dips
-                    if (bar + 1 < numBars && barEnergies[bar + 1] < 0.8f * meanEnergy) {
-                        cueInSample = (long) (bar * barDurationSec * analysisRate);
-                        Log.d(TAG, String.format("Found cue-in at bar %d (~%.1fs, energy=%.3f, %.0f%% of mean)",
-                                bar, bar * barDurationSec, barEnergies[bar], 100 * barEnergies[bar] / meanEnergy));
-                        foundCueIn = true;
-                        break;
-                    }
+                    cueInSample = (long) (bar * barDurationSec * analysisRate);
+                    Log.d(TAG, String.format("Found cue-in at bar %d (~%.1fs, energy=%.3f, %.0f%% of mean)",
+                            bar, bar * barDurationSec, barEnergies[bar], 100 * barEnergies[bar] / meanEnergy));
+                    foundCueIn = true;
+                    break;
                 }
             }
 
