@@ -54,10 +54,7 @@ public class AudioPlayerManager {
         }
     }
 
-    /**
-     * Get current playback position in milliseconds.
-     * @return Current position in ms, or 0 if no track loaded
-     */
+    // get current position in ms
     public long getCurrentPosition() {
         if (mediaPlayer != null) {
             try {
@@ -69,10 +66,7 @@ public class AudioPlayerManager {
         return 0;
     }
 
-    /**
-     * Get total duration of current track in milliseconds.
-     * @return Duration in ms, or 0 if no track loaded
-     */
+    // get duration in ms
     public long getDuration() {
         if (mediaPlayer != null) {
             try {
@@ -84,10 +78,7 @@ public class AudioPlayerManager {
         return 0;
     }
 
-    /**
-     * Check if currently playing.
-     * @return true if playing, false otherwise
-     */
+    // check if playing
     public boolean isPlaying() {
         if (mediaPlayer != null) {
             try {
@@ -99,10 +90,7 @@ public class AudioPlayerManager {
         return false;
     }
 
-    /**
-     * Seek to a specific position.
-     * @param positionMs Position in milliseconds
-     */
+    // seek to position in ms
     public void seekTo(long positionMs) {
         if (mediaPlayer != null) {
             try {
